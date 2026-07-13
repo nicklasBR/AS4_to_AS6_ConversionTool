@@ -3,6 +3,13 @@
  * Main application logic for analyzing and converting B&R Automation Studio projects
  */
 
+// Debug version - UPDATE THIS AFTER EVERY CHANGE
+const DEBUG_VERSION = "1.1.9";
+const DEBUG_MESSAGE = "Fixed DTM file filtering & path handling";
+
+// Check if debug mode is enabled via query parameter
+const IS_DEBUG_MODE = new URLSearchParams(window.location.search).get('debug') === 'true';
+
 class AS4Converter {
     constructor() {
         this.projectFiles = new Map(); // filename -> { content, type, path }
@@ -15,8 +22,20 @@ class AS4Converter {
         this.isAS6Project = false; // Flag if AS6 project is detected
         
         this.initializeUI();
+        if (IS_DEBUG_MODE) {
+            this.displayDebugVersion();
+        }
         this.bindEvents();
         this.checkBrowserCompatibility();
+    }
+    
+    displayDebugVersion() {
+        const versionEl = document.getElementById('debugVersion');
+        if (versionEl) {
+            versionEl.textContent = `🐛 DEBUG v${DEBUG_VERSION} - ${DEBUG_MESSAGE}`;
+            versionEl.style.cssText = 'font-size: 11px; color: #ff6b6b; margin-top: 4px; font-weight: bold; display: block;';
+        }
+        console.log(`🐛 AS4 to AS6 Converter DEBUG MODE v${DEBUG_VERSION} - ${DEBUG_MESSAGE}`);
     }
     
     detectEdge() {
@@ -325,116 +344,11 @@ class AS4Converter {
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         }
         
-        // All supported B&R Automation Studio file extensions
-        const relevantExtensions = [
-            // Code files
-            '.st', '.fun', '.typ', '.var', '.prg', '.svar',
-            // Hardware and config
-            '.hw', '.hwl', '.sw', '.per',
-            // Project and package
-            '.xml', '.pkg', '.apj',
-            // Motion/Axis
-            '.ax', '.apt', '.ncm', '.ncc', '.dob', '.vax',
-            // mappView binding lists
-            '.bindinglist',
-            // mappView expressions
-            '.expression', '.expressiontype',
-            // Localization
-            '.tmx', '.textconfig', '.units',
-            // I/O and mapping
-            '.iom', '.vvm',
-            // Libraries
-            '.lby', '.br',
-            // Library binary files (for user libraries that need their compiled binaries)
-            '.a', '.o',
-            // ANSI C source files (critical for custom libraries)
-            '.c', '.h',
-            // mappView / Visualization
-            '.content', '.eventbinding', '.binding', '.action',
-            '.page', '.layout', '.dialog', '.theme', '.styles',
-            '.vis', '.mappviewcfg', '.widgetlibrary', '.snippet',
-            // mappView custom widgets and keyboards
-            '.numpad', '.compoundwidget', '.stylesset',
-            // OPC UA
-            '.uaserver', '.uad', '.uacfg', '.uadcfg',
-            // mapp components
-            '.mpalarmxcore', '.mpalarmxhistory', '.mprecipexml', '.mprecipecsv', '.mpdatarecorder',
-            '.mpalarmxlist', '.mpalarmxcategory', '.mpalarmxquery',
-            '.mpcomgroup', '.mpfilemanagerui',
-            '.mpwebxs', '.mpreportcore', '.mpaudittrail',  // mappServices additional components
-            // mappVision
-            '.visionapplication', '.visioncomponent', '.vicfg',
-            // VC (Visual Components / Keyboards)
-            '.dis',
-            // Security and access
-            '.role', '.user', '.firewallrules',
-            // DTM / Device configuration
-            '.dtm', '.dtmdre', '.dtmtre', '.dtmdri',
-            // Motion/Data objects
-            '.ett',
-            // Language/Localization
-            '.language',
-            // Safety
-            '.sfapp', '.swt',
-            // Media/assets
-            '.jpg', '.svg', '.png', '.gif', '.bmp', '.ico',
-            // Build scripts
-            '.ps1', '.bat', '.cmd',
-            // Git/config
-            '.gitignore',
-            // Licenses and docs
-            '.md', '.doc', '.txt',
-            // Documents folder files (must be copied unchanged)
-            '.pdf', '.chm', '.hlp',                              // Documentation/help files
-            '.docx', '.xls', '.xlsx', '.xlsm', '.ppt', '.pptx',  // Office documents
-            '.scn',                                               // Scene files
-            '.stl', '.obj', '.step', '.stp', '.iges', '.igs',    // 3D model files
-            '.xdd', '.eds', '.gsd', '.gsdml',                    // Device description files
-            '.exe', '.dll',                                       // Executables
-            '.zip', '.rar', '.7z',                               // Archives
-            '.bin', '.dat',                                       // Binary data files
-            '.csv', '.json',                                      // Data files
-            // Alarm/Text configuration
-            '.alcfg', '.algrp', '.txtgrp',
-            // Bus Navigator
-            '.bnc', '.bns', '.set', '.sxostd', '.xostd',
-            // Safety Designer files (text-based)
-            '.cic', '.ciw', '.dip', '.dit', '.diw', '.gs', '.il', '.ioc', '.lci', '.ldi', '.off', '.pou', '.tdi', '.proj', '.plcproj',
-            // Data source/version
-            '.dso', '.cvinfo',
-            // Extension/config files
-            '.ext', '.cfg', '.inf', '.ini', '.dir',
-            // Additional text files
-            '.lst', '.mev', '.mrk', '.rej', '.resolve', '.txc', '.vcr', '.vcug', '.wwv',
-            // Web/script files
-            '.html', '.js', '.vbs', '.url',
-            // Graph files
-            '.graphml',
-            // Visual Components
-            '.vcp',
-            // Safety binary files (need to be copied as-is)
-            '.saf', '.sos', '.sim', '.st1', '.sto', '.pr2',
-            // Cross-reference files
-            '.crcl', '.ibs', '.lov', '.wwd',
-            // Source control
-            '.scc',
-            // Help cache
-            '.chw'
-        ];
-        // Folders to exclude (temp/build artifacts)
-        const excludedFolders = ['Temp', 'Binaries', 'Diagnosis'];
-        
+        // Filter files using path-based approach instead of extension whitelist
+        // This includes all files from Logical/ and Physical/ folders, plus .apj files
         const relevantFiles = files.filter(file => {
             const filePath = file.relativePath || file.webkitRelativePath || file.name;
-            const pathParts = filePath.split(/[/\\]/);
-            
-            // Exclude files in temp/build folders
-            if (pathParts.some(part => excludedFolders.includes(part))) {
-                return false;
-            }
-            
-            const ext = this.getFileExtension(file.name);
-            return relevantExtensions.includes(ext);
+            return this.shouldIncludeFile(filePath);
         });
         
         // Debug: Log filtered binary files
@@ -449,6 +363,7 @@ class AS4Converter {
         const totalFiles = relevantFiles.length;
         if (progressDialog) {
             progressMessage.textContent = `Loading ${totalFiles} project files...`;
+            progressDetails.textContent = `Filtered from ${files.length} total files (Logical/ + Physical/ + .apj)`;
             // Yield to let browser paint updated message
             await new Promise(resolve => requestAnimationFrame(resolve));
         }
@@ -682,76 +597,16 @@ class AS4Converter {
     async processExtractedFiles(files, progressDialog, progressBar, progressPercent, progressMessage, progressDetails) {
         this.projectFiles.clear();
 
-        // All supported B&R Automation Studio file extensions (same filter as processFiles)
-        const relevantExtensions = [
-            '.st', '.fun', '.typ', '.var', '.prg', '.svar',
-            '.hw', '.hwl', '.sw', '.per',
-            '.xml', '.pkg', '.apj',
-            '.ax', '.apt', '.ncm', '.ncc', '.dob', '.vax',
-            '.bindinglist', '.expression', '.expressiontype',
-            '.tmx', '.textconfig', '.units',
-            '.iom', '.vvm',
-            '.lby', '.br', '.a', '.o',
-            '.c', '.h',
-            '.content', '.eventbinding', '.binding', '.action',
-            '.page', '.layout', '.dialog', '.theme', '.styles',
-            '.vis', '.mappviewcfg', '.widgetlibrary', '.snippet',
-            '.numpad', '.compoundwidget', '.stylesset',
-            '.uaserver', '.uad', '.uacfg', '.uadcfg',
-            '.mpalarmxcore', '.mpalarmxhistory', '.mprecipexml', '.mprecipecsv', '.mpdatarecorder',
-            '.mpalarmxlist', '.mpalarmxcategory', '.mpalarmxquery',
-            '.mpcomgroup', '.mpfilemanagerui',
-            '.mpwebxs', '.mpreportcore', '.mpaudittrail',
-            '.visionapplication', '.visioncomponent', '.vicfg',
-            '.dis', '.role', '.user', '.firewallrules',
-            '.dtm', '.dtmdre', '.dtmtre', '.dtmdri',
-            '.ett', '.language', '.sfapp', '.swt',
-            '.jpg', '.svg', '.png', '.gif', '.bmp', '.ico',
-            '.ps1', '.bat', '.cmd', '.gitignore',
-            '.md', '.doc', '.txt',
-            '.pdf', '.chm', '.hlp', '.chw',
-            '.docx', '.xls', '.xlsx', '.xlsm', '.ppt', '.pptx',
-            '.scn', '.stl', '.obj', '.step', '.stp', '.iges', '.igs',
-            '.xdd', '.eds', '.gsd', '.gsdml',
-            '.exe', '.dll', '.zip', '.rar', '.7z',
-            '.bin', '.dat', '.csv', '.json',
-            // Alarm/Text configuration
-            '.alcfg', '.algrp', '.txtgrp',
-            // Bus Navigator
-            '.bnc', '.bns', '.set', '.sxostd', '.xostd',
-            // Safety Designer files
-            '.cic', '.ciw', '.dip', '.dit', '.diw', '.gs', '.il', '.ioc', '.lci', '.ldi', '.off', '.pou', '.tdi', '.proj', '.plcproj',
-            '.saf', '.sos', '.sim', '.st1', '.sto', '.pr2',
-            // Data source/version
-            '.dso', '.cvinfo',
-            // Extension/config files
-            '.ext', '.cfg', '.inf', '.ini', '.dir',
-            // Additional files
-            '.lst', '.mev', '.mrk', '.rej', '.resolve', '.txc', '.vcr', '.vcug', '.wwv',
-            '.crcl', '.ibs', '.lov', '.wwd', '.scc',
-            // Web/script files
-            '.html', '.js', '.vbs', '.url',
-            // Graph/Visual
-            '.graphml', '.vcp'
-        ];
-
-        const excludedFolders = ['Temp', 'Binaries', 'Diagnosis'];
-
+        // Filter files using path-based approach instead of extension whitelist
+        // This includes all files from Logical/ and Physical/ folders, plus .apj files
         const relevantFiles = files.filter(file => {
             const filePath = file.relativePath || file.webkitRelativePath || file.name;
-            const pathParts = filePath.split(/[/\\]/);
-            
-            if (pathParts.some(part => excludedFolders.includes(part))) {
-                return false;
-            }
-            
-            const ext = this.getFileExtension(file.name);
-            return relevantExtensions.includes(ext);
+            return this.shouldIncludeFile(filePath);
         });
 
         if (progressDialog) {
             progressMessage.textContent = `Loading ${relevantFiles.length} project files...`;
-            progressDetails.textContent = `Filtered from ${files.length} total files`;
+            progressDetails.textContent = `Filtered from ${files.length} total files (Logical/ + Physical/ + .apj)`;
             await new Promise(resolve => requestAnimationFrame(resolve));
         }
 
@@ -834,114 +689,17 @@ class AS4Converter {
                 await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
             }
             
-            // All supported B&R Automation Studio file extensions
-            const relevantExtensions = [
-                // Code files
-                '.st', '.fun', '.typ', '.var', '.prg', '.svar',
-                // Hardware and config
-                '.hw', '.hwl', '.sw', '.per',
-                // Project and package
-                '.xml', '.pkg', '.apj',
-                // Motion/Axis
-                '.ax', '.apt', '.ncm', '.ncc', '.dob', '.vax',
-                // mappView binding lists
-                '.bindinglist',
-                // mappView expressions
-                '.expression', '.expressiontype',
-                // Localization
-                '.tmx', '.textconfig', '.units',
-                // I/O and mapping
-                '.iom', '.vvm',
-                // Libraries
-                '.lby', '.br',
-                // Library binary files (for user libraries that need their compiled binaries)
-                '.a', '.o',
-                // ANSI C source files (critical for custom libraries)
-                '.c', '.h',
-                // mappView / Visualization
-                '.content', '.eventbinding', '.binding', '.action',
-                '.page', '.layout', '.dialog', '.theme', '.styles',
-                '.vis', '.mappviewcfg', '.widgetlibrary', '.snippet',
-                // mappView custom widgets and keyboards
-                '.numpad', '.compoundwidget', '.stylesset',
-                // OPC UA
-                '.uaserver', '.uad', '.uacfg', '.uadcfg',
-                // mapp components
-                '.mpalarmxcore', '.mpalarmxhistory', '.mprecipexml', '.mprecipecsv', '.mpdatarecorder',
-                '.mpalarmxlist', '.mpalarmxcategory', '.mpalarmxquery',
-                '.mpcomgroup', '.mpfilemanagerui',
-                '.mpwebxs', '.mpreportcore', '.mpaudittrail',
-                // mappVision
-                '.visionapplication', '.visioncomponent', '.vicfg',
-                // VC keyboards
-                '.dis',
-                // Security and access
-                '.role', '.user', '.firewallrules',
-                // DTM / Device configuration
-                '.dtm', '.dtmdre', '.dtmtre', '.dtmdri',
-                // Motion/Data objects
-                '.ett',
-                // Language/Localization
-                '.language',
-                // Safety (text-based)
-                '.sfapp',
-                // Safety binary files
-                '.swt', '.saf', '.sos', '.sim', '.st1', '.sto', '.pr2',
-                // Media/assets
-                '.jpg', '.svg', '.png', '.gif', '.bmp', '.ico',
-                // Build scripts
-                '.ps1', '.bat', '.cmd',
-                // Git/config
-                '.gitignore',
-                // Licenses and docs
-                '.md', '.doc', '.txt',
-                // Documents folder files
-                '.pdf', '.chm', '.hlp', '.chw',
-                '.docx', '.xls', '.xlsx', '.xlsm', '.ppt', '.pptx',
-                '.scn', '.stl', '.obj', '.step', '.stp', '.iges', '.igs',
-                '.xdd', '.eds', '.gsd', '.gsdml',
-                '.exe', '.dll', '.zip', '.rar', '.7z',
-                '.bin', '.dat', '.csv', '.json',
-                // Alarm/Text configuration
-                '.alcfg', '.algrp', '.txtgrp',
-                // Bus Navigator
-                '.bnc', '.bns', '.set', '.sxostd', '.xostd',
-                // Safety Designer files (text-based)
-                '.cic', '.ciw', '.dip', '.dit', '.diw', '.gs', '.il', '.ioc', '.lci', '.ldi', '.off', '.pou', '.tdi', '.proj', '.plcproj',
-                // Data source/version
-                '.dso', '.cvinfo',
-                // Extension/config files
-                '.ext', '.cfg', '.inf', '.ini', '.dir',
-                // Additional files
-                '.lst', '.mev', '.mrk', '.rej', '.resolve', '.txc', '.vcr', '.vcug', '.wwv',
-                '.crcl', '.ibs', '.lov', '.wwd', '.scc',
-                // Web/script files
-                '.html', '.js', '.vbs', '.url',
-                // Graph/Visual
-                '.graphml', '.vcp'
-            ];
-            
-            // Folders to exclude (temp/build artifacts)
-            const excludedFolders = ['Temp', 'Binaries', 'Diagnosis'];
-            
-            // Filter relevant files first
+            // Filter files using path-based approach instead of extension whitelist
+            // This includes all files from Logical/ and Physical/ folders, plus .apj files
             const relevantFiles = files.filter(file => {
                 const filePath = file.relativePath || file.webkitRelativePath || file.name;
-                const pathParts = filePath.split(/[/\\]/);
-                
-                // Exclude files in temp/build folders
-                if (pathParts.some(part => excludedFolders.includes(part))) {
-                    return false;
-                }
-                
-                const ext = this.getFileExtension(file.name);
-                return relevantExtensions.includes(ext);
+                return this.shouldIncludeFile(filePath);
             });
             
             // Update progress after filtering
             if (progressDialog) {
                 progressMessage.textContent = `Loading ${relevantFiles.length} project files...`;
-                progressDetails.textContent = `Filtered from ${files.length} total files`;
+                progressDetails.textContent = `Filtered from ${files.length} total files (Logical/ + Physical/ + .apj)`;
                 // Yield to let browser paint updated message
                 await new Promise(resolve => requestAnimationFrame(resolve));
             }
@@ -1036,6 +794,8 @@ class AS4Converter {
         '.vax',
         // Safety project files
         '.saf', '.sos', '.sim', '.swt', '.st1', '.sto', '.pr2',
+        // DTM device configuration files (binary)
+        '.dtm', '.dtmdre', '.dtmdri', '.dtmtre',
         // Help cache
         '.chw',
         // Source control cache
@@ -1098,6 +858,60 @@ class AS4Converter {
                 reject(err);
             }
         });
+    }
+
+    /**
+     * Determines if a file should be included in the project based on its path.
+     * 
+     * Inclusion rules:
+     * - Files in Logical/ folder and all subfolders
+     * - Files in Physical/ folder and all subfolders
+     * - .apj files at the project root
+     * 
+     * Exclusion rules:
+     * - Temp/ folder and all contents
+     * - Binaries/ folder and all contents
+     * - Diagnosis/ folder and all contents
+     * 
+     * @param {string} filePath - The relative path of the file (e.g., "ProjectName/Logical/Package.pkg")
+     * @returns {boolean} - True if the file should be included, false otherwise
+     */
+    shouldIncludeFile(filePath) {
+        const pathParts = filePath.split(/[\/\\]/).filter(p => p.length > 0);
+        
+        if (pathParts.length === 0) {
+            return false;
+        }
+        
+        // Folders to EXCLUDE (system, build artifacts, caches)
+        const excludedFolders = [
+            'Temp', 'Binaries', 'Diagnosis',
+            '.git', '.svn', '.vscode', 'Backup', '__MACOSX'
+        ];
+        
+        // Check if ANY part of the path is an excluded folder (case-insensitive)
+        if (pathParts.some(part => 
+            excludedFolders.some(ef => ef.toLowerCase() === part.toLowerCase())
+        )) {
+            return false;
+        }
+        
+        // Get the filename (last part of the path)
+        const fileName = pathParts[pathParts.length - 1];
+        
+        // ALWAYS include .apj files (project file) regardless of location
+        if (fileName.toLowerCase().endsWith('.apj')) {
+            return true;
+        }
+        
+        // Include if file is within Logical/ or Physical/ folders
+        // Path format can be: "Logical/..." or "ProjectName/Logical/..."
+        const hasLogicalOrPhysical = pathParts.some((part) => {
+            const lowerPart = part.toLowerCase();
+            return lowerPart === 'logical' || lowerPart === 'physical';
+        });
+        
+        return hasLogicalOrPhysical;
     }
 
     getFileExtension(filename) {
@@ -1165,6 +979,7 @@ class AS4Converter {
             '.widgetlibrary': 'visualization',
             '.snippet': 'visualization',
             '.numpad': 'visualization',
+            '.alphapad': 'visualization',
             '.compoundwidget': 'visualization',
             '.stylesset': 'visualization',
             
@@ -1180,6 +995,10 @@ class AS4Converter {
             '.mprecipexml': 'mapp_component',
             '.mprecipecsv': 'mapp_component',
             '.mpdatarecorder': 'mapp_component',
+            
+            // mappCockpit
+            '.mcocfg': 'mapp_cockpit',
+            '.mcowebservercfg': 'mapp_cockpit',
             
             // Security and access
             '.role': 'security',
@@ -1305,24 +1124,156 @@ class AS4Converter {
     }
 
     renderFileTree() {
-        const tree = document.createElement('ul');
-        tree.className = 'tree-list';
-        
-        const sortedPaths = Array.from(this.projectFiles.keys()).sort();
-        
-        sortedPaths.forEach(path => {
-            const file = this.projectFiles.get(path);
-            const li = document.createElement('li');
-            li.className = 'tree-item';
-            li.innerHTML = `
-                <span class="file-icon">${this.getFileIcon(file.type)}</span>
-                <span class="file-name">${path}</span>
-            `;
-            tree.appendChild(li);
+        const container = this.elements.fileTree;
+        container.innerHTML = '';
+
+        if (this.projectFiles.size === 0) return;
+
+        // ---- 1. Categorize files by top-level project folder ----
+        const categories = new Map(); // categoryLabel -> Map(relativePath -> file)
+        const categoryOrder = [
+            { key: 'Logical',  icon: '🧠', label: 'Logical (Tasks & Programs)' },
+            { key: 'Physical', icon: '🔌', label: 'Physical (Hardware Config)' },
+            { key: 'project',  icon: '🗂️', label: 'Project Files' },
+            { key: 'other',    icon: '📄', label: 'Other Files' }
+        ];
+        categoryOrder.forEach(c => categories.set(c.key, new Map()));
+
+        this.projectFiles.forEach((file, path) => {
+            const normalized = path.replace(/\\/g, '/');
+            const lowerPath = normalized.toLowerCase();
+            // Detect category by looking for Logical/ or Physical/ anywhere in path
+            if (lowerPath.includes('/logical/') || lowerPath.startsWith('logical/')) {
+                categories.get('Logical').set(normalized, file);
+            } else if (lowerPath.includes('/physical/') || lowerPath.startsWith('physical/')) {
+                categories.get('Physical').set(normalized, file);
+            } else if (file.type === 'project' || normalized.endsWith('.apj')) {
+                categories.get('project').set(normalized, file);
+            } else {
+                categories.get('other').set(normalized, file);
+            }
         });
-        
-        this.elements.fileTree.innerHTML = '';
-        this.elements.fileTree.appendChild(tree);
+
+        // ---- 2. Render each category ----
+        for (const catDef of categoryOrder) {
+            const files = categories.get(catDef.key);
+            if (files.size === 0) continue;
+
+            const catSection = document.createElement('div');
+            catSection.className = 'tree-category';
+
+            const catHeader = document.createElement('div');
+            catHeader.className = 'tree-category-header';
+            catHeader.innerHTML = `<span class="tree-toggle">▶</span> ${catDef.icon} <strong>${catDef.label}</strong> <span class="tree-count">(${files.size})</span>`;
+            catHeader.addEventListener('click', () => {
+                const isOpen = catSection.classList.toggle('open');
+                catHeader.querySelector('.tree-toggle').textContent = isOpen ? '▼' : '▶';
+                treeRoot.style.display = isOpen ? 'block' : 'none';
+            });
+            catSection.appendChild(catHeader);
+
+            // Build a nested folder tree from the paths
+            const treeRoot = this.buildFolderTree(files, catDef.key);
+            treeRoot.style.display = 'none'; // categories start collapsed
+            catSection.appendChild(treeRoot);
+
+            container.appendChild(catSection);
+        }
+    }
+
+    /**
+     * Build a nested <ul> tree of folders and files from a Map of paths.
+     * Each folder level is collapsible.
+     */
+    buildFolderTree(fileMap, categoryKey) {
+        // Build nested object: { __files__: [], subfolderName: { ... } }
+        const root = { __files__: [] };
+
+        fileMap.forEach((file, fullPath) => {
+            const normalized = fullPath.replace(/\\/g, '/');
+            const parts = normalized.split('/');
+
+            // Strip everything up to and including the category folder (e.g. "MDP23/Logical/")
+            let startIdx = 0;
+            if (categoryKey === 'Logical' || categoryKey === 'Physical') {
+                const catIdx = parts.findIndex(p => p.toLowerCase() === categoryKey.toLowerCase());
+                startIdx = catIdx >= 0 ? catIdx + 1 : 0;
+            } else {
+                // For project/other: skip the project root folder name
+                startIdx = parts.length > 1 ? 1 : 0;
+            }
+
+            const relevant = parts.slice(startIdx);
+            if (relevant.length === 0) return;
+
+            let node = root;
+            for (let i = 0; i < relevant.length - 1; i++) {
+                const folder = relevant[i];
+                if (!node[folder]) node[folder] = { __files__: [] };
+                node = node[folder];
+            }
+            node.__files__.push({ name: relevant[relevant.length - 1], file, fullPath });
+        });
+
+        return this.renderFolderNode(root, 0);
+    }
+
+    /**
+     * Recursively render a folder node into a <ul> element.
+     */
+    renderFolderNode(node, depth) {
+        const ul = document.createElement('ul');
+        ul.className = 'tree-folder-list';
+        if (depth > 0) ul.style.display = 'none'; // collapsed by default
+
+        // Render sub-folders first (sorted)
+        const folders = Object.keys(node).filter(k => k !== '__files__').sort();
+        for (const folderName of folders) {
+            const li = document.createElement('li');
+            li.className = 'tree-folder';
+
+            const childNode = node[folderName];
+            const count = this.countTreeItems(childNode);
+
+            const header = document.createElement('div');
+            header.className = 'tree-folder-header';
+            header.innerHTML = `<span class="tree-toggle">▶</span> 📁 <span class="tree-folder-name">${folderName}</span> <span class="tree-count">(${count})</span>`;
+
+            const childUl = this.renderFolderNode(childNode, depth + 1);
+
+            header.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = li.classList.toggle('open');
+                header.querySelector('.tree-toggle').textContent = isOpen ? '▼' : '▶';
+                childUl.style.display = isOpen ? 'block' : 'none';
+            });
+
+            li.appendChild(header);
+            li.appendChild(childUl);
+            ul.appendChild(li);
+        }
+
+        // Render files (sorted)
+        const files = (node.__files__ || []).sort((a, b) => a.name.localeCompare(b.name));
+        for (const entry of files) {
+            const li = document.createElement('li');
+            li.className = 'tree-file';
+            li.innerHTML = `<span class="file-icon">${this.getFileIcon(entry.file.type)}</span> <span class="file-name">${entry.name}</span>`;
+            ul.appendChild(li);
+        }
+
+        return ul;
+    }
+
+    /**
+     * Count total files in a folder tree node (recursively).
+     */
+    countTreeItems(node) {
+        let count = (node.__files__ || []).length;
+        for (const key of Object.keys(node)) {
+            if (key !== '__files__') count += this.countTreeItems(node[key]);
+        }
+        return count;
     }
 
     getFileIcon(type) {
@@ -1428,8 +1379,32 @@ class AS4Converter {
         this.elements.btnScan.disabled = true;
         this.elements.btnScan.textContent = '⏳ Analyzing...';
         
+        // Show scan progress dialog
+        const scanDialog = document.getElementById('scanProgressDialog');
+        const scanBar = document.getElementById('scanProgressBar');
+        const scanPercent = document.getElementById('scanProgressPercent');
+        const scanMessage = document.getElementById('scanProgressMessage');
+        const scanDetails = document.getElementById('scanProgressDetails');
+        
+        const showScanProgress = (percent, message, details) => {
+            if (!scanDialog) return;
+            scanDialog.classList.remove('hidden');
+            scanBar.style.width = `${percent}%`;
+            scanPercent.textContent = `${percent}%`;
+            if (message) scanMessage.textContent = message;
+            if (details) scanDetails.textContent = details;
+        };
+        
+        // Yield to let browser paint
+        const yieldToUI = () => new Promise(resolve => setTimeout(resolve, 0));
+        
+        showScanProgress(0, 'Starting analysis...', '');
+        await yieldToUI();
+        
         try {
             // Check for obsolete target hardware first - this is a blocking error
+            showScanProgress(2, 'Checking hardware compatibility...', '');
+            await yieldToUI();
             const obsoleteHardware = this.detectObsoleteTargetHardware();
             if (obsoleteHardware.length > 0) {
                 // Set blocking error flag
@@ -1454,14 +1429,25 @@ class AS4Converter {
                 });
                 
                 // Display results and show blocking error banner
+                if (scanDialog) scanDialog.classList.add('hidden');
                 this.displayAnalysisResults();
                 this.switchTab('analysis');
                 return; // Stop analysis here - don't continue with other checks
             }
             
-            // Analyze each file
-            for (const [path, file] of this.projectFiles) {
+            // Phase 1: Analyze each file
+            const fileEntries = [...this.projectFiles];
+            const totalFiles = fileEntries.length;
+            for (let i = 0; i < totalFiles; i++) {
+                const [path, file] = fileEntries[i];
                 await this.analyzeFile(path, file);
+                
+                // Update progress every 5% or every 20 files
+                if (i % Math.max(1, Math.floor(totalFiles / 20)) === 0) {
+                    const pct = Math.round(5 + (i / totalFiles) * 35); // 5%–40%
+                    showScanProgress(pct, 'Scanning files for deprecations...', `${i + 1} / ${totalFiles} files`);
+                    await yieldToUI();
+                }
             }
             
             // Sort results by severity
@@ -1470,41 +1456,48 @@ class AS4Converter {
                 return (severityOrder[a.severity] || 3) - (severityOrder[b.severity] || 3);
             });
             
-            // Auto-apply project file conversion (.apj AS4 → AS6)
-            this.autoApplyProjectFileConversion();
+            // Phase 2: Auto-apply conversions with progress updates
+            const autoApplySteps = [
+                ['Applying project file conversion...', () => this.autoApplyProjectFileConversion()],
+                ['Updating library versions...', () => this.autoApplyLibraryVersionUpdates()],
+                ['Replacing deprecated functions...', () => this.autoApplyFunctionReplacements()],
+                ['Replacing deprecated library references...', () => this.autoApplyDeprecatedLibraryReplacements()],
+                ['Applying motion type replacements...', () => this.autoApplyMotionTypeReplacements()],
+                ['Converting OPC UA files...', () => this.autoApplyUadFileConversion()],
+                ['Applying mappServices conversion...', () => this.autoApplyMappServicesConversion()],
+                ['Applying MpDataRecorder conversion...', () => this.autoApplyMpDataRecorderConversion()],
+                ['Applying mappView config updates...', () => this.autoApplyMappViewConfigConversion()],
+                ['Ensuring UA server files...', () => this.autoApplyEnsureUaServerFile()],
+                ['Fixing OPC UA connection policy...', () => this.autoApplyUaServerConnectionPolicy()],
+                ['Fixing OPC UA security settings...', () => this.autoApplyUaServerSecuritySettings()],
+                ['Fixing UA config security policy...', () => this.autoApplyUaCfgSecurityPolicyNone()],
+                ['Removing deprecated function blocks...', () => this.autoApplyDeprecatedFunctionBlockRemoval()],
+                ['Commenting deprecated struct members...', () => this.autoCommentDeprecatedStructMembers()],
+                ['Commenting removed FB inputs/outputs...', () => this.autoCommentRemovedFBInputs()],
+                ['Removing SafetyRelease attributes...', () => { this.autoRemoveSafetyRelease(); this.autoRemoveSafetyRelease(); }],
+                ['Updating VC firmware version...', () => this.autoUpdateVcFirmwareVersion()],
+                ['Fixing OpcUa_any devices...', () => this.autoApplyOpcUaAnyChannelBrowsePath()],
+                ['Upgrading OPC UA Information Model...', () => this.autoApplyOpcUaInformationModelUpgrade()],
+                ['Removing MpWebXs package...', () => this.autoRemoveMpWebXs()],
+                ['Removing user passwords...', () => this.autoApplyUserPasswordRemoval()],
+                ['Adding BR_Engineer roles...', () => this.autoApplyUserBREngineerRole()],
+                ['Applying config file transforms...', () => this.autoApplyConfigTransforms()],
+            ];
             
-            // Auto-apply library version updates for technology package libraries
-            this.autoApplyLibraryVersionUpdates();
+            for (let i = 0; i < autoApplySteps.length; i++) {
+                const [stepMsg, stepFn] = autoApplySteps[i];
+                const pct = Math.round(40 + (i / autoApplySteps.length) * 55); // 40%–95%
+                showScanProgress(pct, stepMsg, `Step ${i + 1} / ${autoApplySteps.length}`);
+                await yieldToUI();
+                stepFn();
+            }
             
-            // Auto-apply function replacements (memset→brsmemset, etc.)
-            this.autoApplyFunctionReplacements();
+            // Done
+            showScanProgress(100, 'Analysis complete!', `${this.analysisResults.length} findings`);
+            await yieldToUI();
             
-            // Auto-apply deprecated library function and constant replacements (AsMath→AsBrMath, AsString→AsBrStr)
-            this.autoApplyDeprecatedLibraryReplacements();
-            
-            // Auto-apply OPC UA conversion (OpcUA → OpcUaCs, FileVersion 10, config files)
-            this.autoApplyUadFileConversion();
-            
-            // Auto-apply mappServices AlarmX conversion (split core file to AS6 format)
-            this.autoApplyMappServicesConversion();
-            
-            // Auto-apply mappView configuration updates (startup user to anonymous)
-            this.autoApplyMappViewConfigConversion();
-            
-            // Auto-remove deprecated function blocks (MpAlarmXAcknowledgeAll, etc.)
-            this.autoApplyDeprecatedFunctionBlockRemoval();
-            
-            // Auto-remove SafetyRelease from .pkg files (not supported in AS6)
-            this.autoRemoveSafetyRelease();
-            
-            // Auto-update Visual Components firmware version in cpu.pkg files
-            this.autoUpdateVcFirmwareVersion();
-            
-            // Auto-add ChannelBrowsePath to OpcUa_any devices in .hw files
-            this.autoApplyOpcUaAnyChannelBrowsePath();
-            
-            // Auto-remove MpWebXs technology package (not supported in AS6)
-            this.autoRemoveMpWebXs();
+            // Brief delay so user sees completion
+            await new Promise(resolve => setTimeout(resolve, 300));
             
             // Update UI
             this.displayAnalysisResults();
@@ -1514,6 +1507,7 @@ class AS4Converter {
             console.error('Analysis error:', error);
             alert('Error during analysis: ' + error.message);
         } finally {
+            if (scanDialog) scanDialog.classList.add('hidden');
             this.elements.btnScan.disabled = false;
             this.elements.btnScan.textContent = '🔍 Scan for Deprecations';
         }
@@ -1532,6 +1526,8 @@ class AS4Converter {
             case 'structured_text':
             case 'function_block':
             case 'program':
+            case 'variable':
+            case 'type_definition':
                 this.analyzeStructuredText(path, content);
                 break;
             case 'hardware':
@@ -1602,6 +1598,27 @@ class AS4Converter {
         
         // Check for deprecated library function calls (AsString, AsWStr, etc.)
         this.scanForDeprecatedFunctionCalls(path, content);
+        
+        // Check for deprecated motion types (McAcpAx* → Mc* for AS6)
+        this.scanForDeprecatedMotionTypes(path, content);
+        
+        // Check for deprecated enum values (AS4 → AS6 renames)
+        this.scanForDeprecatedEnumValues(path, content);
+        
+        // Check for deprecated struct/FB member names (AS4 → AS6 renames)
+        this.scanForDeprecatedMemberNames(path, content);
+        
+        // Check for deprecated function block declarations (removed in AS6)
+        this.scanForDeprecatedFunctionBlockDeclarations(path, content);
+        
+        // Check for behavioral changes that need manual review (AS4 → AS6)
+        this.scanForBehavioralWarnings(path, content);
+        
+        // Check for FB interface changes (removed inputs/outputs in AS6)
+        this.scanForFBInterfaceChanges(path, content);
+        
+        // Check for info type renames/splits in AS6
+        this.scanForInfoTypeRenames(path, content);
         
         // Check for function calls that match deprecated functions
         DeprecationDatabase.functions.forEach(func => {
@@ -1750,10 +1767,401 @@ class AS4Converter {
     }
 
     /**
+     * Scan for deprecated motion types (McAcpAx* → Mc* for AS6 migration)
+     * These are type definitions used in variable declarations that need updating
+     * when migrating from ACOPOS-specific types to generic McAxis types.
+     */
+    scanForDeprecatedMotionTypes(path, content) {
+        // Get motion type mappings from the database
+        const typeMappings = DeprecationDatabase.as6Format?.motionTypeMappings;
+        if (!typeMappings || typeMappings.length === 0) {
+            return;
+        }
+        
+        typeMappings.forEach(mapping => {
+            // Create regex pattern to match type names as standalone identifiers
+            // Match patterns like: ": McAcpAxCamAutParType" or "OF McAcpAxCamAutParType"
+            const pattern = new RegExp(`\\b${this.escapeRegex(mapping.old)}\\b`, 'gi');
+            let match;
+            
+            while ((match = pattern.exec(content)) !== null) {
+                this.addFinding({
+                    type: 'deprecated_motion_type',
+                    name: mapping.old,
+                    severity: 'warning',
+                    description: `Deprecated motion type: ${mapping.old} → ${mapping.new}`,
+                    replacement: { 
+                        name: mapping.new, 
+                        description: mapping.notes 
+                    },
+                    notes: `McAcpAx type ${mapping.old} is replaced by ${mapping.new} in AS6 McAxis library. This is part of the ACP10_MC to mapp Axis migration.`,
+                    file: path,
+                    line: this.getLineNumber(content, match.index),
+                    context: this.getCodeContext(content, match.index),
+                    original: match[0],
+                    autoReplace: true,
+                    conversion: {
+                        type: 'motion_type',
+                        from: mapping.old,
+                        to: mapping.new,
+                        automated: true
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Scan for deprecated enum values (AS4 → AS6 migration)
+     * Some enum values were renamed in AS6 libraries
+     */
+    scanForDeprecatedEnumValues(path, content) {
+        // Get enum mappings from the database
+        const enumMappings = DeprecationDatabase.as6Format?.enumMappings;
+        if (!enumMappings || enumMappings.length === 0) {
+            return;
+        }
+        
+        enumMappings.forEach(mapping => {
+            // Create regex pattern to match enum values as standalone identifiers
+            const pattern = new RegExp(`\\b${this.escapeRegex(mapping.old)}\\b`, 'gi');
+            let match;
+            
+            while ((match = pattern.exec(content)) !== null) {
+                this.addFinding({
+                    type: 'deprecated_constant',
+                    name: mapping.old,
+                    severity: 'warning',
+                    description: `Deprecated enum value: ${mapping.old} → ${mapping.new}`,
+                    replacement: { 
+                        name: mapping.new, 
+                        description: mapping.notes 
+                    },
+                    notes: `Enum value ${mapping.old} is renamed to ${mapping.new} in AS6 ${mapping.library} library.`,
+                    file: path,
+                    line: this.getLineNumber(content, match.index),
+                    context: this.getCodeContext(content, match.index),
+                    original: match[0],
+                    autoReplace: true,
+                    parentLibrary: mapping.library,
+                    conversion: {
+                        type: 'constant',
+                        from: mapping.old,
+                        to: mapping.new,
+                        automated: true
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Scan for deprecated struct/FB member names (AS4 → AS6 migration)
+     * Some struct/function block members were renamed in AS6 libraries
+     * Uses pattern-based matching to only match variables that contain the FB type name
+     * e.g., MpReportCore_0.Name, MpReportCore_Main.Name → .FileName
+     */
+    scanForDeprecatedMemberNames(path, content) {
+        // Get member mappings from the database
+        const memberMappings = DeprecationDatabase.as6Format?.memberMappings;
+        if (!memberMappings || memberMappings.length === 0) {
+            return;
+        }
+        
+        memberMappings.forEach(mapping => {
+            // Use the pattern from the mapping (e.g., "(MpReportCore\\w*)\\.Name\\b")
+            // This ensures we only match variables that contain the FB type name
+            const pattern = new RegExp(mapping.pattern, 'gi');
+            let match;
+            
+            while ((match = pattern.exec(content)) !== null) {
+                // match[0] = full match (e.g., "MpReportCore_0.Name")
+                // match[1] = captured group (e.g., "MpReportCore_0")
+                const varName = match[1];
+                const fullMatch = match[0];
+                
+                this.addFinding({
+                    type: 'deprecated_member_rename',
+                    name: `${mapping.structType}.${mapping.old}`,
+                    severity: 'warning',
+                    description: `Member rename: ${varName}.${mapping.old} → ${varName}.${mapping.new}`,
+                    replacement: { 
+                        name: `${varName}.${mapping.new}`, 
+                        description: mapping.notes 
+                    },
+                    notes: `In AS6, ${mapping.structType}.${mapping.old} was renamed to ${mapping.structType}.${mapping.new}.`,
+                    file: path,
+                    line: this.getLineNumber(content, match.index),
+                    context: this.getCodeContext(content, match.index),
+                    original: fullMatch,
+                    autoReplace: true,
+                    parentLibrary: mapping.library,
+                    conversion: {
+                        type: 'member_rename',
+                        pattern: mapping.pattern,
+                        replacement: mapping.replacement,
+                        from: fullMatch,
+                        to: fullMatch.replace(new RegExp(mapping.pattern, 'i'), mapping.replacement),
+                        automated: true
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Scan for behavioral changes in AS6 that cannot be auto-fixed.
+    /**
+     * Scan for deprecated function block declarations in .var/.typ/.st/.fun/.prg files.
+     * Reports findings so they appear in the analysis report.
+     */
+    scanForDeprecatedFunctionBlockDeclarations(path, content) {
+        const deprecatedFBs = DeprecationDatabase.deprecatedFunctionBlocks;
+        if (!deprecatedFBs || deprecatedFBs.length === 0) return;
+        
+        const ext = path.toLowerCase().split('.').pop();
+        if (!['var', 'typ', 'st', 'fun', 'prg'].includes(ext)) return;
+        
+        deprecatedFBs.forEach(fb => {
+            const fbPattern = new RegExp(`^\\s*(\\w+)\\s*:\\s*${this.escapeRegex(fb.name)}\\b`, 'gm');
+            let match;
+            
+            while ((match = fbPattern.exec(content)) !== null) {
+                this.addFinding({
+                    type: 'deprecated_function_block',
+                    name: fb.name,
+                    severity: fb.severity,
+                    description: fb.description,
+                    replacement: fb.replacement,
+                    notes: fb.notes,
+                    file: path,
+                    line: this.getLineNumber(content, match.index),
+                    context: this.getCodeContext(content, match.index),
+                    original: match[0],
+                    autoReplace: fb.autoRemove,
+                    conversion: {
+                        type: 'deprecated_function_block',
+                        automated: fb.autoRemove
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Scan for behavioral changes in AS6 that cannot be auto-fixed.
+     * These are semantic/timing changes that require manual developer review.
+     * Flags affected lines with informational findings.
+     */
+    scanForBehavioralWarnings(path, content) {
+        const warnings = DeprecationDatabase.as6Format?.behavioralWarnings;
+        if (!warnings || warnings.length === 0) {
+            return;
+        }
+        
+        warnings.forEach(warning => {
+            const pattern = new RegExp(warning.pattern, 'gi');
+            let match;
+            
+            while ((match = pattern.exec(content)) !== null) {
+                this.addFinding({
+                    type: 'behavioral_change',
+                    name: warning.id,
+                    severity: warning.severity,
+                    description: warning.description,
+                    replacement: null,
+                    notes: warning.notes,
+                    file: path,
+                    line: this.getLineNumber(content, match.index),
+                    context: this.getCodeContext(content, match.index),
+                    original: match[0],
+                    autoReplace: false,
+                    parentLibrary: warning.library,
+                    conversion: {
+                        type: 'behavioral_change',
+                        automated: false
+                    }
+                });
+            }
+        });
+    }
+
+    /**
      * Escape special regex characters in a string
      */
     escapeRegex(str) {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    /**
+     * Scan for FB interface changes (removed inputs/outputs) in AS6.
+     * Two-pass approach:
+     * 1) Find FB type declarations to collect instance variable names
+     * 2) Scan for assignments to removed members on those instances
+     */
+    scanForFBInterfaceChanges(path, content) {
+        const fbChanges = DeprecationDatabase.fbInterfaceChanges;
+        if (!fbChanges || fbChanges.length === 0) {
+            return;
+        }
+
+        // Group changes by fbType for efficiency
+        const changesByType = {};
+        fbChanges.forEach(change => {
+            if (!changesByType[change.fbType]) {
+                changesByType[change.fbType] = [];
+            }
+            changesByType[change.fbType].push(change);
+        });
+
+        // Pass 1: Collect instance names from this file and all .var/.typ files
+        const instanceMap = {}; // fbType → Set of instance names
+        
+        // Scan current file for declarations
+        for (const fbType of Object.keys(changesByType)) {
+            const declPattern = new RegExp(`\\b(\\w+)\\s*:\\s*${this.escapeRegex(fbType)}\\b`, 'gm');
+            let match;
+            while ((match = declPattern.exec(content)) !== null) {
+                if (!instanceMap[fbType]) instanceMap[fbType] = new Set();
+                instanceMap[fbType].add(match[1]);
+            }
+        }
+
+        // Also scan all loaded .var and .typ files for declarations
+        if (this.projectFiles) {
+            this.projectFiles.forEach((file, filePath) => {
+                if (file.isBinary) return;
+                const ext = filePath.toLowerCase().split('.').pop();
+                if (!['var', 'typ'].includes(ext)) return;
+                
+                for (const fbType of Object.keys(changesByType)) {
+                    const declPattern = new RegExp(`\\b(\\w+)\\s*:\\s*${this.escapeRegex(fbType)}\\b`, 'gm');
+                    let match;
+                    while ((match = declPattern.exec(file.content)) !== null) {
+                        if (!instanceMap[fbType]) instanceMap[fbType] = new Set();
+                        instanceMap[fbType].add(match[1]);
+                    }
+                }
+            });
+        }
+
+        // Pass 2: Scan current file for member access on known instances
+        for (const [fbType, instances] of Object.entries(instanceMap)) {
+            if (instances.size === 0) continue;
+            const changes = changesByType[fbType];
+            
+            for (const instanceName of instances) {
+                for (const change of changes) {
+                    // Match: instanceName.MemberName (with word boundary)
+                    const usagePattern = new RegExp(
+                        `\\b${this.escapeRegex(instanceName)}\\.${this.escapeRegex(change.memberName)}\\b`, 'gi'
+                    );
+                    let match;
+                    
+                    while ((match = usagePattern.exec(content)) !== null) {
+                        // Skip if already commented out
+                        const lineStart = content.lastIndexOf('\n', match.index) + 1;
+                        const lineContent = content.substring(lineStart, content.indexOf('\n', match.index));
+                        if (lineContent.trim().startsWith('//') || lineContent.trim().startsWith('(*')) continue;
+
+                        this.addFinding({
+                            type: 'fb_interface_change',
+                            name: `${change.fbType}.${change.memberName}`,
+                            severity: change.severity,
+                            description: change.description,
+                            replacement: null,
+                            notes: change.notes,
+                            file: path,
+                            line: this.getLineNumber(content, match.index),
+                            context: this.getCodeContext(content, match.index),
+                            original: match[0],
+                            autoReplace: false,
+                            parentLibrary: change.library,
+                            conversion: {
+                                type: 'fb_interface_change',
+                                changeType: change.direction,
+                                automated: change.autoComment || false,
+                                todoMessage: change.todoMessage
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Scan for info structure type renames (split types) in AS6.
+     * Detects usage of old info types that were split into per-FB types.
+     */
+    scanForInfoTypeRenames(path, content) {
+        const renames = DeprecationDatabase.infoTypeRenames;
+        if (!renames || renames.length === 0) {
+            return;
+        }
+
+        renames.forEach(rename => {
+            const pattern = new RegExp(`\\b${this.escapeRegex(rename.old)}\\b`, 'gi');
+            let match;
+
+            while ((match = pattern.exec(content)) !== null) {
+                // Skip commented lines
+                const lineStart = content.lastIndexOf('\n', match.index) + 1;
+                const lineContent = content.substring(lineStart, content.indexOf('\n', match.index));
+                if (lineContent.trim().startsWith('//') || lineContent.trim().startsWith('(*')) continue;
+
+                if (rename.isSplit) {
+                    // Split type: warn with list of possible replacements
+                    this.addFinding({
+                        type: 'info_type_split',
+                        name: rename.old,
+                        severity: 'warning',
+                        description: `${rename.old} split into multiple types in AS6 - manual selection required`,
+                        replacement: {
+                            name: rename.replacements.join(' | '),
+                            description: rename.notes
+                        },
+                        notes: rename.notes,
+                        file: path,
+                        line: this.getLineNumber(content, match.index),
+                        context: this.getCodeContext(content, match.index),
+                        original: match[0],
+                        autoReplace: false,
+                        parentLibrary: rename.library,
+                        conversion: {
+                            type: 'info_type_rename',
+                            automated: false,
+                            possibleReplacements: rename.replacements
+                        }
+                    });
+                } else {
+                    // 1:1 rename: auto-replace
+                    this.addFinding({
+                        type: 'info_type_rename',
+                        name: rename.old,
+                        severity: 'warning',
+                        description: `${rename.old} → ${rename.new} in AS6`,
+                        replacement: {
+                            name: rename.new,
+                            description: rename.notes
+                        },
+                        notes: rename.notes,
+                        file: path,
+                        line: this.getLineNumber(content, match.index),
+                        context: this.getCodeContext(content, match.index),
+                        original: match[0],
+                        autoReplace: true,
+                        parentLibrary: rename.library,
+                        conversion: {
+                            type: 'info_type_rename',
+                            from: rename.old,
+                            to: rename.new,
+                            automated: true
+                        }
+                    });
+                }
+            }
+        });
     }
 
     analyzeXML(path, content) {
@@ -2651,9 +3059,10 @@ class AS4Converter {
                 return;
             }
             
-            // Only process source files (.st, .c, .cpp)
+            // Only process IEC 61131-3 Structured Text source files
+            // Note: Do NOT include .c, .cpp, .h files - the function mappings are for ST only
             const ext = filePath.toLowerCase().split('.').pop();
-            if (!['st', 'c', 'cpp', 'h'].includes(ext)) {
+            if (!['st', 'var', 'typ', 'fun', 'prg'].includes(ext)) {
                 return;
             }
             
@@ -2728,9 +3137,10 @@ class AS4Converter {
             // Skip binary files
             if (file.isBinary) return;
             
-            // Only process source files (.st, .c, .cpp, .h, .var, .typ)
+            // Only process IEC 61131-3 Structured Text source files
+            // Note: Do NOT include .c, .cpp, .h files - the function/constant mappings are for ST only
             const ext = filePath.toLowerCase().split('.').pop();
-            if (!['st', 'c', 'cpp', 'h', 'var', 'typ', 'fun'].includes(ext)) return;
+            if (!['st', 'var', 'typ', 'fun', 'prg'].includes(ext)) return;
             
             let content = file.content;
             let modified = false;
@@ -2853,19 +3263,20 @@ class AS4Converter {
                     
                     if (isPackagePkg) {
                         // For Package.pkg: <Object Type="Library">LibName</Object>
+                        // IMPORTANT: Only match Type="Library", not Type="Package" or Type="File"
                         // Check if replacement already exists to avoid duplicates
-                        const newLibPattern = new RegExp(`>\\s*${newLib}\\s*<\\/Object>`, 'i');
-                        const oldLibPattern = new RegExp(`>\\s*${oldLib}\\s*<\\/Object>`, 'i');
+                        const newLibPattern = new RegExp(`<Object\\s+Type="Library"[^>]*>\\s*${newLib}\\s*<\\/Object>`, 'i');
+                        const oldLibPattern = new RegExp(`<Object\\s+Type="Library"[^>]*>\\s*${oldLib}\\s*<\\/Object>`, 'i');
                         
                         if (oldLibPattern.test(content)) {
                             if (newLibPattern.test(content)) {
                                 // Replacement exists - remove old library entry
-                                const removePattern = new RegExp(`\\s*<Object[^>]*>\\s*${oldLib}\\s*<\\/Object>\\s*\\n?`, 'gi');
+                                const removePattern = new RegExp(`\\s*<Object\\s+Type="Library"[^>]*>\\s*${oldLib}\\s*<\\/Object>\\s*\\n?`, 'gi');
                                 content = content.replace(removePattern, '');
                                 console.log(`Removed duplicate library '${oldLib}' from ${filePath} (replacement '${newLib}' already exists)`);
                             } else {
                                 // Rename old library to new
-                                content = content.replace(oldLibPattern, `>${newLib}</Object>`);
+                                content = content.replace(oldLibPattern, `<Object Type="Library">${newLib}</Object>`);
                                 console.log(`Replaced library '${oldLib}' with '${newLib}' in ${filePath}`);
                             }
                             modified = true;
@@ -2897,6 +3308,76 @@ class AS4Converter {
             });
         }
         
+        // Also update <Dependency> entries in .lby files of custom libraries
+        // When replacing e.g. AsString→AsBrStr, custom libraries that depend on AsString
+        // need their <Dependency ObjectName="asstring" /> updated to the new library name
+        const allLibsToUpdate = DeprecationDatabase.libraries.filter(
+            lib => lib.autoReplace || lib.replacement === null
+        );
+        
+        if (allLibsToUpdate.length > 0) {
+            console.log(`Processing .lby dependency updates for ${allLibsToUpdate.length} deprecated libraries...`);
+            
+            let lbyFileCount = 0;
+            this.projectFiles.forEach((file, filePath) => {
+                if (typeof file.content !== 'string') return;
+                if (!filePath.toLowerCase().endsWith('.lby')) return;
+                lbyFileCount++;
+                
+                let content = file.content;
+                let modified = false;
+                const hasDependencies = content.includes('<Dependency');
+                console.log(`  .lby file: ${filePath} (has dependencies: ${hasDependencies}, content length: ${content.length})`);
+                
+                allLibsToUpdate.forEach(lib => {
+                    const oldLib = lib.name;
+                    // Case-insensitive match for ObjectName in Dependency tags
+                    const oldDepPattern = new RegExp(
+                        `(<Dependency\\s+[^>]*ObjectName\\s*=\\s*")${oldLib}(")`,'gi'
+                    );
+                    
+                    if (!oldDepPattern.test(content)) return;
+                    // Reset lastIndex after test
+                    oldDepPattern.lastIndex = 0;
+                    
+                    if (lib.replacement && lib.replacement.name) {
+                        const newLib = lib.replacement.name;
+                        // Check if a dependency on the replacement already exists
+                        const newDepPattern = new RegExp(
+                            `<Dependency\\s+[^>]*ObjectName\\s*=\\s*"${newLib}"`, 'i'
+                        );
+                        
+                        if (newDepPattern.test(content)) {
+                            // Replacement dependency already exists - remove the old one
+                            const removePattern = new RegExp(
+                                `\\s*<Dependency\\s+[^>]*ObjectName\\s*=\\s*"${oldLib}"[^>]*\\/?>\\s*\\n?`, 'gi'
+                            );
+                            content = content.replace(removePattern, '');
+                            console.log(`Removed duplicate dependency '${oldLib}' from ${filePath} (dependency '${newLib}' already exists)`);
+                        } else {
+                            // Rename old dependency to new
+                            content = content.replace(oldDepPattern, `$1${newLib}$2`);
+                            console.log(`Replaced dependency '${oldLib}' with '${newLib}' in ${filePath}`);
+                        }
+                        modified = true;
+                    } else {
+                        // No replacement - remove the dependency entirely
+                        const removePattern = new RegExp(
+                            `\\s*<Dependency\\s+[^>]*ObjectName\\s*=\\s*"${oldLib}"[^>]*\\/?>\\s*\\n?`, 'gi'
+                        );
+                        content = content.replace(removePattern, '');
+                        console.log(`Removed deprecated dependency '${oldLib}' from ${filePath} (no AS6 replacement)`);
+                        modified = true;
+                    }
+                });
+                
+                if (modified) {
+                    file.content = content;
+                }
+            });
+            console.log(`Scanned ${lbyFileCount} .lby file(s) for dependency updates`);
+        }
+        
         // Also remove deprecated libraries that have no replacement (e.g., AsSafety)
         const librariesToRemove = DeprecationDatabase.libraries.filter(
             lib => lib.replacement === null && (lib.severity === 'warning' || lib.severity === 'error')
@@ -2922,10 +3403,11 @@ class AS4Converter {
                     
                     if (isPackagePkg) {
                         // For Package.pkg: <Object Type="Library">LibName</Object>
-                        const libPattern = new RegExp(`>\\s*${libName}\\s*<\\/Object>`, 'i');
+                        // IMPORTANT: Only match Type="Library", not Type="Package" or Type="File"
+                        const libPattern = new RegExp(`<Object\\s+Type="Library"[^>]*>\\s*${libName}\\s*<\\/Object>`, 'i');
                         
                         if (libPattern.test(content)) {
-                            const removePattern = new RegExp(`\\s*<Object[^>]*>\\s*${libName}\\s*<\\/Object>\\s*\\n?`, 'gi');
+                            const removePattern = new RegExp(`\\s*<Object\\s+Type="Library"[^>]*>\\s*${libName}\\s*<\\/Object>\\s*\\n?`, 'gi');
                             content = content.replace(removePattern, '');
                             console.log(`Removed deprecated library '${libName}' from ${filePath} (no AS6 replacement available)`);
                             modified = true;
@@ -2958,6 +3440,67 @@ class AS4Converter {
         });
         
         console.log('Deprecated library replacements completed');
+    }
+
+    /**
+     * Auto-apply motion type replacements for AS4 McAcpAx → AS6 McAxis migration
+     * Replaces ACOPOS-specific types (McAcpAx*) with generic McAxis types (Mc*)
+     * Reference: AS6 Help - "Migrating from ACP10_MC to mapp Axis"
+     */
+    autoApplyMotionTypeReplacements() {
+        console.log('Auto-applying motion type replacements (McAcpAx* → Mc*)...');
+        
+        // Get motion type mappings from the database
+        const typeMappings = DeprecationDatabase.as6Format?.motionTypeMappings;
+        if (!typeMappings || typeMappings.length === 0) {
+            console.log('No motion type mappings found');
+            return;
+        }
+        
+        console.log(`Found ${typeMappings.length} motion type mappings to process`);
+        
+        // Process each source file
+        this.projectFiles.forEach((file, filePath) => {
+            // Skip binary files
+            if (file.isBinary) return;
+            
+            // Only process IEC 61131-3 Structured Text source files
+            // Note: Type definitions appear in .typ, .var, .st, .fun, .prg files
+            const ext = filePath.toLowerCase().split('.').pop();
+            if (!['st', 'var', 'typ', 'fun', 'prg'].includes(ext)) return;
+            
+            let content = file.content;
+            let modified = false;
+            let replacementCount = 0;
+            
+            typeMappings.forEach(mapping => {
+                const escapedOld = mapping.old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pattern = new RegExp(`\\b${escapedOld}\\b`, 'g');
+                
+                if (pattern.test(content)) {
+                    content = content.replace(pattern, mapping.new);
+                    modified = true;
+                    replacementCount++;
+                    console.log(`Replaced ${mapping.old} → ${mapping.new} in ${filePath}`);
+                }
+            });
+            
+            if (modified) {
+                file.content = content;
+                console.log(`Applied ${replacementCount} motion type replacements in ${filePath}`);
+            }
+        });
+        
+        // Mark motion type findings as applied
+        this.analysisResults.forEach(finding => {
+            if (finding.type === 'deprecated_motion_type' && finding.autoReplace && finding.status !== 'applied') {
+                finding.status = 'applied';
+                finding.autoFixed = true;
+                finding.notes = (finding.notes || '') + ' [Auto-applied]';
+            }
+        });
+        
+        console.log('Motion type replacements completed');
     }
 
     /**
@@ -3106,7 +3649,9 @@ class AS4Converter {
             // Replace AutomaticEnable="True" with RecursiveEnable="1"
             .replace(/AutomaticEnable=["']True["']/gi, 'RecursiveEnable="1"')
             // Replace EnableArrayElements="True" with RecursiveEnable="1"
-            .replace(/EnableArrayElements=["']True["']/gi, 'RecursiveEnable="1"');
+            .replace(/EnableArrayElements=["']True["']/gi, 'RecursiveEnable="1"')
+            // Deduplicate RecursiveEnable when element had both AutomaticEnable and EnableArrayElements
+            .replace(/RecursiveEnable="1"\s+RecursiveEnable="1"/g, 'RecursiveEnable="1"');
         
         // Remove <DefaultView> wrapper (AS6 uses direct <Module> elements instead)
         // The DefaultView element was used in AS4 but is removed in AS6 FileVersion 10
@@ -3139,7 +3684,7 @@ class AS4Converter {
     <Group ID="Security">
       <Group ID="MessageSecurity">
         <Group ID="SecurityPolicies">
-          <Property ID="None" Value="0" />
+          <Property ID="None" Value="1" />
           <Property ID="Basic128Rsa15" Value="0" />
           <Property ID="Basic256" Value="0" />
           <Property ID="Aes128Sha256RsaOaep" Value="1" />
@@ -3473,8 +4018,8 @@ ${roleGroups}
         
         console.log(`  Found ${elements.length} Element node(s): ${elements.map(e => e.id).join(', ')}`);
         
-        // Look up parent groups from mpcomgroup files
-        const parentGroupMap = this.findMpComGroupParents();
+        // Look up parent groups from mpcomgroup files (use stored map - Linking/Subnodes already stripped)
+        const parentGroupMap = this.mpComGroupParentMap || this.findMpComGroupParents();
         
         // Generate the core file with all Elements (references to lists and categories)
         const coreElements = [];
@@ -3483,12 +4028,13 @@ ${roleGroups}
         const queryElements = [];
         
         for (const elem of elements) {
-            const elemId = elem.id;
-            const parentGroup = parentGroupMap.get(elemId);
+            const originalElemId = elem.id;
+            const elemId = this.truncateElementId(elem.id, 23); // 32 - '_Category'.length
+            const parentGroup = parentGroupMap.get(originalElemId);
             
-            // Extract Configuration content (alarm definitions)
-            const configMatch = elem.content.match(/<Group ID="mapp\.AlarmX\.Core\.Configuration">([\s\S]*?)<\/Group>(?=\s*<Group ID="mapp\.AlarmX\.Core\.Snippets">|\s*$)/);
-            const snippetsMatch = elem.content.match(/<Group ID="mapp\.AlarmX\.Core\.Snippets">([\s\S]*?)<\/Group>\s*$/);
+            // Extract Configuration and Snippets content using depth-based extraction (robust against nesting/ordering)
+            const configContent = this.extractXmlGroupContent(elem.content, 'mapp.AlarmX.Core.Configuration');
+            const snippetsContent = this.extractXmlGroupContent(elem.content, 'mapp.AlarmX.Core.Snippets');
             
             // Create core Element with references
             let coreElem = `  <Element ID="${elemId}" Type="mpalarmxcore">
@@ -3517,13 +4063,13 @@ ${roleGroups}
             
             // Create list Element with alarm definitions and snippets
             let listElem = `  <Element ID="${elemId}_List" Type="mpalarmxlist">`;
-            if (configMatch && configMatch[1].trim()) {
+            if (configContent && configContent.trim()) {
                 listElem += `
-    <Group ID="mapp.AlarmX.Core.Configuration">${configMatch[1]}</Group>`;
+    <Group ID="mapp.AlarmX.Core.Configuration">${configContent}</Group>`;
             }
-            if (snippetsMatch && snippetsMatch[1].trim()) {
+            if (snippetsContent && snippetsContent.trim()) {
                 listElem += `
-    <Group ID="mapp.AlarmX.Core.Snippets">${snippetsMatch[1]}</Group>`;
+    <Group ID="mapp.AlarmX.Core.Snippets">${snippetsContent}</Group>`;
             }
             listElem += `
   </Element>`;
@@ -3557,56 +4103,62 @@ ${categoryElements.join('\n')}
 ${queryElements.join('\n')}
 </Configuration>`;
         
+        // Truncate base name to 8 characters to ensure generated file names don't exceed 10 chars
+        const truncatedBaseName = this.truncateBaseName(baseName, 8);
+        if (truncatedBaseName !== baseName) {
+            changes.push(`Truncated base name from '${baseName}' to '${truncatedBaseName}' for 10-char limit`);
+        }
+        
         // Delete the original file
         this.projectFiles.delete(originalPath);
         changes.push(`Removed original file: ${fileName}`);
         
         // Add new files
-        const newCorePath = folderPath + baseName + '_1.mpalarmxcore';
+        const newCorePath = folderPath + truncatedBaseName + '_1.mpalarmxcore';
         this.projectFiles.set(newCorePath, {
             content: newCoreContent,
             type: 'mapp_component',
-            name: baseName + '_1.mpalarmxcore',
+            name: truncatedBaseName + '_1.mpalarmxcore',
             extension: '.mpalarmxcore',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_1.mpalarmxcore with ${elements.length} Element(s)`);
+        changes.push(`Created ${truncatedBaseName}_1.mpalarmxcore with ${elements.length} Element(s)`);
         
-        const newListPath = folderPath + baseName + '_L.mpalarmxlist';
+        const newListPath = folderPath + truncatedBaseName + '_L.mpalarmxlist';
         this.projectFiles.set(newListPath, {
             content: newListContent,
             type: 'mapp_component',
-            name: baseName + '_L.mpalarmxlist',
+            name: truncatedBaseName + '_L.mpalarmxlist',
             extension: '.mpalarmxlist',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_L.mpalarmxlist with alarm definitions`);
+        changes.push(`Created ${truncatedBaseName}_L.mpalarmxlist with alarm definitions`);
         
-        const newCategoryPath = folderPath + baseName + '_C.mpalarmxcategory';
+        const newCategoryPath = folderPath + truncatedBaseName + '_C.mpalarmxcategory';
         this.projectFiles.set(newCategoryPath, {
             content: newCategoryContent,
             type: 'mapp_component',
-            name: baseName + '_C.mpalarmxcategory',
+            name: truncatedBaseName + '_C.mpalarmxcategory',
             extension: '.mpalarmxcategory',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_C.mpalarmxcategory`);
+        changes.push(`Created ${truncatedBaseName}_C.mpalarmxcategory`);
         
-        const newQueryPath = folderPath + baseName + '_Q.mpalarmxquery';
+        const newQueryPath = folderPath + truncatedBaseName + '_Q.mpalarmxquery';
         this.projectFiles.set(newQueryPath, {
             content: newQueryContent,
             type: 'mapp_component',
-            name: baseName + '_Q.mpalarmxquery',
+            name: truncatedBaseName + '_Q.mpalarmxquery',
             extension: '.mpalarmxquery',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_Q.mpalarmxquery`);
+        changes.push(`Created ${truncatedBaseName}_Q.mpalarmxquery`);
         
         // Handle history file conversion
-        this.convertMpAlarmXHistory(folderPath, baseName, changes);
+        this.convertMpAlarmXHistory(folderPath, truncatedBaseName, changes);
         
-        // Update Package.pkg
-        this.updatePackagePkgForAlarmX(folderPath, baseName, changes);
+        // Update Package.pkg (pass both original and truncated for proper removal/addition)
+        this.updatePackagePkgForAlarmX(folderPath, baseName, truncatedBaseName, changes);
         
         // Add to analysis results
         this.analysisResults.push({
@@ -3684,7 +4236,9 @@ ${queryElements.join('\n')}
         
         for (const historyInfo of historyFilesToConvert) {
             const { path: hPath, file: hFile, fileName: hFileName } = historyInfo;
-            const historyBaseName = hFileName.replace(/\.mpalarmxhistory$/i, '');
+            const historyBaseNameOriginal = hFileName.replace(/\.mpalarmxhistory$/i, '');
+            // Truncate history base name to 8 characters to ensure generated file names don't exceed 10 chars
+            const historyBaseName = this.truncateBaseName(historyBaseNameOriginal, 8);
             
             // Update history file content to AS6 format
             let historyContent = hFile.content;
@@ -3692,7 +4246,7 @@ ${queryElements.join('\n')}
                 // Add the mapp.Gen group if not present
                 if (!historyContent.includes('mapp.Gen')) {
                     const elemIdMatch = historyContent.match(/<Element ID="([^"]+)"/);
-                    const elemId = elemIdMatch ? elemIdMatch[1] : 'mpAlarmXHistory';
+                    const elemId = this.truncateElementId(elemIdMatch ? elemIdMatch[1] : 'mpAlarmXHistory');
                     
                     historyContent = `<?xml version="1.0" encoding="utf-8"?>
 <Configuration>
@@ -3724,27 +4278,88 @@ ${queryElements.join('\n')}
     }
     
     /**
-     * Update Package.pkg with new AlarmX file entries
+     * Truncate a base name to ensure file names with suffixes don't exceed 10 characters.
+     * AS6 has a 10-character limit for certain file names.
+     * 
+     * @param {string} baseName - Original base name
+     * @param {number} maxLength - Maximum length for base name (default 8, to allow 2-char suffix)
+     * @returns {string} - Truncated base name
      */
-    updatePackagePkgForAlarmX(folderPath, baseName, changes) {
+    truncateBaseName(baseName, maxLength = 8) {
+        if (baseName.length <= maxLength) {
+            return baseName;
+        }
+        const truncated = baseName.substring(0, maxLength);
+        console.log(`  Truncated base name from '${baseName}' to '${truncated}' (10-char limit)`);
+        return truncated;
+    }
+
+    /**
+     * Truncate a mapp component element ID so that derived object names
+     * stay within the 32-character AS6 object name limit.
+     *
+     * For components that generate suffixed names (_List, _Category, _Query)
+     * pass maxLength = 32 − longestSuffixLength (e.g. 23 for AlarmX).
+     * For components without suffixes, use the default maxLength = 32.
+     *
+     * Prefers truncating at a camelCase boundary (uppercase letter) or underscore
+     * for a more readable result, falling back to a hard cut when no good boundary exists.
+     *
+     * @param {string} elemId    - Original element ID from AS4
+     * @param {number} maxLength - Maximum allowed length for the base ID (default 32)
+     * @returns {string} Element ID that is at most maxLength characters
+     */
+    truncateElementId(elemId, maxLength = 32) {
+        if (elemId.length <= maxLength) {
+            return elemId;
+        }
+
+        const candidate = elemId.substring(0, maxLength);
+
+        // Walk backwards looking for a camelCase transition or underscore boundary
+        let cutAt = -1;
+        for (let i = candidate.length - 1; i > Math.floor(maxLength / 2); i--) {
+            const c = candidate[i];
+            if (c === '_' || (c >= 'A' && c <= 'Z')) {
+                cutAt = i;
+                break;
+            }
+        }
+
+        // Use boundary if found, otherwise hard-cut at maxLength
+        // Strip any trailing underscore left by a boundary cut (e.g. "Foo_Bar_" → "Foo_Bar")
+        const truncated = (cutAt > 0 ? candidate.substring(0, cutAt) : candidate).replace(/_+$/, '') || candidate;
+
+        console.log(`  Truncated element ID from '${elemId}' to '${truncated}' (32-char name limit)`);
+        return truncated;
+    }
+    
+    /**
+     * Update Package.pkg with new AlarmX file entries
+     * @param {string} folderPath - Path to the folder containing Package.pkg
+     * @param {string} originalBaseName - Original base name (used for removing old entries)
+     * @param {string} truncatedBaseName - Truncated base name (used for new entries)
+     * @param {Array} changes - Array to log changes
+     */
+    updatePackagePkgForAlarmX(folderPath, originalBaseName, truncatedBaseName, changes) {
         const pkgPath = folderPath + 'Package.pkg';
         const pkgFile = this.projectFiles.get(pkgPath);
         
         if (pkgFile && typeof pkgFile.content === 'string') {
             let pkgContent = pkgFile.content;
             
-            // Remove old entry
+            // Remove old entry using original base name
             pkgContent = pkgContent.replace(
-                new RegExp(`<Object Type="File">${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.mpalarmxcore</Object>\\s*`, 'gi'), 
+                new RegExp(`<Object Type="File">${originalBaseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.mpalarmxcore</Object>\\s*`, 'gi'), 
                 ''
             );
             
-            // Add new entries before </Objects>
+            // Add new entries using truncated base name before </Objects>
             const newEntries = [
-                `<Object Type="File">${baseName}_1.mpalarmxcore</Object>`,
-                `<Object Type="File">${baseName}_C.mpalarmxcategory</Object>`,
-                `<Object Type="File">${baseName}_L.mpalarmxlist</Object>`,
-                `<Object Type="File">${baseName}_Q.mpalarmxquery</Object>`
+                `<Object Type="File">${truncatedBaseName}_1.mpalarmxcore</Object>`,
+                `<Object Type="File">${truncatedBaseName}_C.mpalarmxcategory</Object>`,
+                `<Object Type="File">${truncatedBaseName}_L.mpalarmxlist</Object>`,
+                `<Object Type="File">${truncatedBaseName}_Q.mpalarmxquery</Object>`
             ];
             
             // Check for existing entries to avoid duplicates
@@ -3782,30 +4397,37 @@ ${queryElements.join('\n')}
         
         console.log(`  Converting with BySeverity format: ${fileName}`);
         
-        // Parse the AS4 content
-        const bySeverityMatch = content.match(/<Group ID="mapp\.AlarmX\.Core">\s*<Group ID="BySeverity">([\s\S]*?)<\/Group>\s*<\/Group>/);
-        const configurationMatch = content.match(/<Group ID="mapp\.AlarmX\.Core\.Configuration">([\s\S]*?)<\/Group>\s*(?=<Group ID="mapp\.AlarmX\.Core\.Snippets">|<\/Element>)/);
-        const snippetsMatch = content.match(/<Group ID="mapp\.AlarmX\.Core\.Snippets">([\s\S]*?)<\/Group>\s*<\/Element>/);
+        // Parse the AS4 content using depth-based XML extraction (robust against sibling ordering)
+        const bySeverityContent = this.extractXmlGroupContent(content, 'BySeverity');
+        const existingMappingContent = this.extractXmlGroupContent(content, 'Mapping');
+        const configurationContent = this.extractXmlGroupContent(content, 'mapp.AlarmX.Core.Configuration');
+        const snippetsContent = this.extractXmlGroupContent(content, 'mapp.AlarmX.Core.Snippets');
         
-        if (!bySeverityMatch) {
+        if (!bySeverityContent) {
             console.log(`  Skipping ${fileName} - no BySeverity section found`);
             return;
         }
         
-        // Extract Element ID (e.g., "mpAlarmXCore")
+        // Extract Element ID (e.g., "mpAlarmXCore") and truncate for 32-char limit
         const elementIdMatch = content.match(/<Element ID="([^"]+)" Type="mpalarmxcore">/);
-        const elementId = elementIdMatch ? elementIdMatch[1] : 'mpAlarmXCore';
+        const elementId = this.truncateElementId(elementIdMatch ? elementIdMatch[1] : 'mpAlarmXCore', 23); // 32 - '_Category'.length
         
-        // Parse BySeverity section and convert to Mapping format
-        const mappingEntries = this.convertBySeverityToMapping(bySeverityMatch[1]);
+        // Parse existing Mapping entries (if any) and preserve them
+        let mappingEntries = [];
+        if (existingMappingContent) {
+            mappingEntries = this.extractExistingMappingEntries(existingMappingContent);
+            console.log(`  Preserved ${mappingEntries.length} existing Mapping entries`);
+        }
+        
+        // Parse BySeverity section and convert to Mapping format, appending after existing entries
+        const bySeverityEntries = this.convertBySeverityToMapping(bySeverityContent, mappingEntries.length);
+        mappingEntries = mappingEntries.concat(bySeverityEntries);
         
         // Create the new core file content (_1.mpalarmxcore)
         const newCoreContent = this.generateAS6CoreFile(elementId, mappingEntries);
         
         // Create the list file content (_L.mpalarmxlist)
-        const configurationContent = configurationMatch ? configurationMatch[1] : '';
-        const snippetsContent = snippetsMatch ? snippetsMatch[1] : '';
-        const newListContent = this.generateAS6ListFile(elementId, configurationContent, snippetsContent);
+        const newListContent = this.generateAS6ListFile(elementId, configurationContent || '', snippetsContent || '');
         
         // Create the category file content (_C.mpalarmxcategory)
         const newCategoryContent = this.generateAS6CategoryFile(elementId);
@@ -3813,50 +4435,56 @@ ${queryElements.join('\n')}
         // Create the query file content (_Q.mpalarmxquery)
         const newQueryContent = this.generateAS6QueryFile(elementId);
         
+        // Truncate base name to 8 characters to ensure generated file names don't exceed 10 chars
+        const truncatedBaseName = this.truncateBaseName(baseName, 8);
+        if (truncatedBaseName !== baseName) {
+            changes.push(`Truncated base name from '${baseName}' to '${truncatedBaseName}' for 10-char limit`);
+        }
+        
         // Delete the original file
         this.projectFiles.delete(originalPath);
         changes.push(`Removed original file: ${fileName}`);
         
         // Add new files
-        const newCorePath = folderPath + baseName + '_1.mpalarmxcore';
+        const newCorePath = folderPath + truncatedBaseName + '_1.mpalarmxcore';
         this.projectFiles.set(newCorePath, {
             content: newCoreContent,
             type: 'mapp_component',
-            name: baseName + '_1.mpalarmxcore',
+            name: truncatedBaseName + '_1.mpalarmxcore',
             extension: '.mpalarmxcore',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_1.mpalarmxcore with Mapping format`);
+        changes.push(`Created ${truncatedBaseName}_1.mpalarmxcore with Mapping format`);
         
-        const newListPath = folderPath + baseName + '_L.mpalarmxlist';
+        const newListPath = folderPath + truncatedBaseName + '_L.mpalarmxlist';
         this.projectFiles.set(newListPath, {
             content: newListContent,
             type: 'mapp_component',
-            name: baseName + '_L.mpalarmxlist',
+            name: truncatedBaseName + '_L.mpalarmxlist',
             extension: '.mpalarmxlist',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_L.mpalarmxlist with alarm definitions`);
+        changes.push(`Created ${truncatedBaseName}_L.mpalarmxlist with alarm definitions`);
         
-        const newCategoryPath = folderPath + baseName + '_C.mpalarmxcategory';
+        const newCategoryPath = folderPath + truncatedBaseName + '_C.mpalarmxcategory';
         this.projectFiles.set(newCategoryPath, {
             content: newCategoryContent,
             type: 'mapp_component',
-            name: baseName + '_C.mpalarmxcategory',
+            name: truncatedBaseName + '_C.mpalarmxcategory',
             extension: '.mpalarmxcategory',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_C.mpalarmxcategory`);
+        changes.push(`Created ${truncatedBaseName}_C.mpalarmxcategory`);
         
-        const newQueryPath = folderPath + baseName + '_Q.mpalarmxquery';
+        const newQueryPath = folderPath + truncatedBaseName + '_Q.mpalarmxquery';
         this.projectFiles.set(newQueryPath, {
             content: newQueryContent,
             type: 'mapp_component',
-            name: baseName + '_Q.mpalarmxquery',
+            name: truncatedBaseName + '_Q.mpalarmxquery',
             extension: '.mpalarmxquery',
             isBinary: false
         });
-        changes.push(`Created ${baseName}_Q.mpalarmxquery`);
+        changes.push(`Created ${truncatedBaseName}_Q.mpalarmxquery`);
         
         // Handle history file renaming (e.g., CfgAlarmH.mpalarmxhistory -> CfgAlarm_2.mpalarmxhistory)
         // Look for a history file that matches the pattern {baseName}H.mpalarmxhistory
@@ -3866,16 +4494,16 @@ ${queryElements.join('\n')}
         this.projectFiles.forEach((hFile, hPath) => {
             if (historyFilePattern.test(hPath) && hPath.toLowerCase().startsWith(folderPath.toLowerCase())) {
                 // Rename the history file
-                const newHistoryPath = folderPath + baseName + '_2.mpalarmxhistory';
+                const newHistoryPath = folderPath + truncatedBaseName + '_2.mpalarmxhistory';
                 
                 // Update history file content to AS6 format
                 let historyContent = hFile.content;
                 if (typeof historyContent === 'string') {
                     // Add the mapp.Gen group if not present - generate complete AS6 format
                     if (!historyContent.includes('mapp.Gen')) {
-                        // Extract the Element ID
+                        // Extract the Element ID and truncate for 32-char limit
                         const elemIdMatch = historyContent.match(/<Element ID="([^"]+)"/);
-                        const elemId = elemIdMatch ? elemIdMatch[1] : 'mpAlarmXHistory';
+                        const elemId = this.truncateElementId(elemIdMatch ? elemIdMatch[1] : 'mpAlarmXHistory');
                         
                         // Generate fresh AS6 format content
                         historyContent = `<?xml version="1.0" encoding="utf-8"?>
@@ -3894,22 +4522,22 @@ ${queryElements.join('\n')}
                 this.projectFiles.set(newHistoryPath, {
                     content: historyContent,
                     type: 'mapp_component',
-                    name: baseName + '_2.mpalarmxhistory',
+                    name: truncatedBaseName + '_2.mpalarmxhistory',
                     extension: '.mpalarmxhistory',
                     isBinary: false
                 });
-                changes.push(`Renamed ${baseName}H.mpalarmxhistory to ${baseName}_2.mpalarmxhistory`);
+                changes.push(`Renamed ${baseName}H.mpalarmxhistory to ${truncatedBaseName}_2.mpalarmxhistory`);
                 
                 // Create the history query file
-                const historyQueryPath = folderPath + baseName + 'H_.mpalarmxquery';
+                const historyQueryPath = folderPath + truncatedBaseName + 'H_.mpalarmxquery';
                 this.projectFiles.set(historyQueryPath, {
                     content: this.generateAS6HistoryQueryFile(),
                     type: 'mapp_component',
-                    name: baseName + 'H_.mpalarmxquery',
+                    name: truncatedBaseName + 'H_.mpalarmxquery',
                     extension: '.mpalarmxquery',
                     isBinary: false
                 });
-                changes.push(`Created ${baseName}H_.mpalarmxquery`);
+                changes.push(`Created ${truncatedBaseName}H_.mpalarmxquery`);
                 
                 historyConverted = true;
             }
@@ -3921,23 +4549,23 @@ ${queryElements.join('\n')}
         if (pkgFile && typeof pkgFile.content === 'string') {
             let pkgContent = pkgFile.content;
             
-            // Remove old entries
+            // Remove old entries using original baseName
             pkgContent = pkgContent.replace(new RegExp(`<Object Type="File">${baseName}\\.mpalarmxcore</Object>\\s*`, 'gi'), '');
             if (historyConverted) {
                 pkgContent = pkgContent.replace(new RegExp(`<Object Type="File">${baseName}H\\.mpalarmxhistory</Object>\\s*`, 'gi'), '');
             }
             
-            // Add new entries before </Objects>
+            // Add new entries using truncatedBaseName before </Objects>
             const newEntries = [
-                `<Object Type="File">${baseName}_1.mpalarmxcore</Object>`,
-                `<Object Type="File">${baseName}_C.mpalarmxcategory</Object>`,
-                `<Object Type="File">${baseName}_L.mpalarmxlist</Object>`,
-                `<Object Type="File">${baseName}_Q.mpalarmxquery</Object>`
+                `<Object Type="File">${truncatedBaseName}_1.mpalarmxcore</Object>`,
+                `<Object Type="File">${truncatedBaseName}_C.mpalarmxcategory</Object>`,
+                `<Object Type="File">${truncatedBaseName}_L.mpalarmxlist</Object>`,
+                `<Object Type="File">${truncatedBaseName}_Q.mpalarmxquery</Object>`
             ];
             
             if (historyConverted) {
-                newEntries.push(`<Object Type="File">${baseName}_2.mpalarmxhistory</Object>`);
-                newEntries.push(`<Object Type="File">${baseName}H_.mpalarmxquery</Object>`);
+                newEntries.push(`<Object Type="File">${truncatedBaseName}_2.mpalarmxhistory</Object>`);
+                newEntries.push(`<Object Type="File">${truncatedBaseName}H_.mpalarmxquery</Object>`);
             }
             
             pkgContent = pkgContent.replace(
@@ -3962,11 +4590,94 @@ ${queryElements.join('\n')}
     }
     
     /**
+     * Extract the inner content of an XML Group element by its ID attribute.
+     * Uses depth-based tracking to correctly handle nested Group elements.
+     * Returns the inner content string, or null if the group is not found.
+     */
+    extractXmlGroupContent(content, groupId) {
+        const startTag = `<Group ID="${groupId}">`;
+        const startIdx = content.indexOf(startTag);
+        if (startIdx === -1) return null;
+        
+        const contentStart = startIdx + startTag.length;
+        let depth = 1;
+        let pos = contentStart;
+        
+        while (depth > 0 && pos < content.length) {
+            const nextOpen = content.indexOf('<Group', pos);
+            const nextClose = content.indexOf('</Group>', pos);
+            
+            if (nextClose === -1) break;
+            
+            if (nextOpen !== -1 && nextOpen < nextClose) {
+                const tagEnd = content.indexOf('>', nextOpen);
+                if (tagEnd !== -1 && content.charAt(tagEnd - 1) === '/') {
+                    pos = tagEnd + 1; // self-closing, skip
+                } else {
+                    depth++;
+                    pos = (tagEnd !== -1) ? tagEnd + 1 : nextOpen + 6;
+                }
+            } else {
+                depth--;
+                if (depth === 0) {
+                    return content.substring(contentStart, nextClose);
+                }
+                pos = nextClose + 8; // length of '</Group>'
+            }
+        }
+        
+        return null; // Malformed XML - couldn't find matching close tag
+    }
+    
+    /**
+     * Extract existing Mapping entries from an AS4 mapp.AlarmX.Core Mapping group.
+     * Converts Selector ID from "[0]" to "Action" for AS6 format.
+     */
+    extractExistingMappingEntries(mappingContent) {
+        const entries = [];
+        let entryIndex = 0;
+        
+        // Parse each <Group ID="[n]"> entry in the Mapping section
+        const groupRegex = /<Group ID="\[\d+\]">([\s\S]*?)<\/Group>(?=\s*(?:<Group ID="\[|$))/g;
+        let match;
+        
+        while ((match = groupRegex.exec(mappingContent)) !== null) {
+            const groupContent = match[1];
+            
+            // Extract Alarm value
+            const alarmMatch = groupContent.match(/<Property ID="Alarm" Value="([^"]*?)"/);
+            const alarm = alarmMatch ? alarmMatch[1] : '';
+            
+            // Extract Selector (Reaction or None)
+            const selectorMatch = groupContent.match(/<Selector ID="\[\d+\]" Value="([^"]*?)"(?:\s*\/>|>([\s\S]*?)<\/Selector>)/);
+            
+            if (selectorMatch && selectorMatch[1] === 'Reaction') {
+                const nameMatch = (selectorMatch[2] || '').match(/<Property ID="Name" Value="([^"]+)"/);
+                entries.push({
+                    index: entryIndex++,
+                    alarm: alarm,
+                    action: 'Reaction',
+                    reactionName: nameMatch ? nameMatch[1] : ''
+                });
+            } else {
+                entries.push({
+                    index: entryIndex++,
+                    alarm: alarm,
+                    action: 'None',
+                    reactionName: null
+                });
+            }
+        }
+        
+        return entries;
+    }
+    
+    /**
      * Convert BySeverity XML content to flat Mapping entries
      */
-    convertBySeverityToMapping(bySeverityContent) {
+    convertBySeverityToMapping(bySeverityContent, startIndex) {
         const mappingEntries = [];
-        let entryIndex = 0;
+        let entryIndex = startIndex || 0;
         
         // Split BySeverity content into individual group entries
         // Match both self-closing groups: <Group ID="[1]" />
@@ -4129,6 +4840,29 @@ ${mappingGroups}
     }
     
     /**
+     * Lowercase the built-in mpAlarmX snippet references in alarm message text.
+     *
+     * In AS4 the predefined Level Monitoring snippets may be capitalized
+     * (e.g. {MonitoredValue}, {&LimitText}, {Limit}), but AS6 requires them to be
+     * lowercase ({monitoredvalue}, {&limittext}, {limit}). Only these specific
+     * built-in snippet names are converted - user-defined snippets (which may be
+     * upper or lower case) are left untouched because the match is anchored to the
+     * reserved names inside the {...} reference syntax.
+     */
+    lowercaseBuiltInSnippets(configurationContent) {
+        if (!configurationContent) {
+            return configurationContent;
+        }
+        // Match a snippet reference: '{' an optional '&amp;'/'&' (translatable) prefix,
+        // one of the reserved built-in names, then '}'. Longer names are listed first
+        // so 'MonitoredValue' is preferred over a hypothetical shorter match.
+        return configurationContent.replace(
+            /\{(&amp;|&)?(MonitoredValue|LimitText|Limit)\}/gi,
+            (match, prefix, name) => `{${prefix || ''}${name.toLowerCase()}}`
+        );
+    }
+
+    /**
      * Generate AS6 list file content with alarm definitions and snippets
      */
     generateAS6ListFile(elementId, configurationContent, snippetsContent) {
@@ -4138,11 +4872,14 @@ ${mappingGroups}
             snippetsSection = `\n    <Group ID="mapp.AlarmX.Snippets">${snippetsContent}</Group>`;
         }
         
+        // Built-in snippet names must be lowercase in AS6 alarm message text
+        const normalizedConfiguration = this.lowercaseBuiltInSnippets(configurationContent);
+        
         return `<?xml version="1.0" encoding="utf-8"?>
 <?AutomationStudio FileVersion="4.9"?>
 <Configuration>
   <Element ID="${elementId}_List" Type="mpalarmxlist">
-    <Group ID="mapp.AlarmX.Core.Configuration">${configurationContent}</Group>${snippetsSection}
+    <Group ID="mapp.AlarmX.Core.Configuration">${normalizedConfiguration}</Group>${snippetsSection}
   </Element>
 </Configuration>`;
     }
@@ -4201,6 +4938,23 @@ ${mappingGroups}
     autoApplyMpComGroupConversion() {
         console.log('Converting MpComGroup configuration to AS6 format...');
         
+        // Step 1: Build element ID → file info map for all mpcomgroup files
+        const elementMap = new Map(); // elementId -> { path, file }
+        this.projectFiles.forEach((file, path) => {
+            if (path.toLowerCase().endsWith('.mpcomgroup') && typeof file.content === 'string') {
+                const idMatch = file.content.match(/<Element ID="([^"]+)" Type="mpcomgroup"/);
+                if (idMatch) {
+                    elementMap.set(idMatch[1], { path, file });
+                }
+            }
+        });
+        
+        // Step 2: Read parent-child relationships BEFORE stripping Linking/Subnodes
+        // This map is also stored for later use by AlarmX conversion
+        this.mpComGroupParentMap = this.findMpComGroupParents();
+        console.log(`  Found ${this.mpComGroupParentMap.size} parent-child relationship(s) in MpComGroup files`);
+        
+        // Step 3: Strip Linking/Subnodes from all files (AS4 parent-declares-children format)
         let convertedCount = 0;
         
         this.projectFiles.forEach((file, path) => {
@@ -4212,7 +4966,7 @@ ${mappingGroups}
                 if (converted !== file.content) {
                     file.content = converted;
                     convertedCount++;
-                    console.log(`  Converted: ${path}`);
+                    console.log(`  Stripped Linking/Subnodes: ${path}`);
                     
                     this.analysisResults.push({
                         severity: 'info',
@@ -4221,13 +4975,76 @@ ${mappingGroups}
                         description: 'Removed Linking/Subnodes groups from MpComGroup configuration',
                         file: path,
                         autoFixed: true,
-                        details: ['Removed Linking/Subnodes groups, kept Selector elements']
+                        details: ['Removed Linking/Subnodes groups (AS4 parent-declares-children format)']
                     });
                 }
             }
         });
         
-        console.log(`Converted ${convertedCount} MpComGroup file(s) to AS6 format`);
+        // Step 3.5: Truncate mpComGroup element IDs exceeding 32 characters
+        const mpComGroupTruncMap = new Map(); // oldId → newId
+        this.projectFiles.forEach((file, path) => {
+            if (path.toLowerCase().endsWith('.mpcomgroup') && typeof file.content === 'string') {
+                const idMatch = file.content.match(/<Element ID="([^"]+)" Type="mpcomgroup"/);
+                if (idMatch && idMatch[1].length > 32) {
+                    const oldId = idMatch[1];
+                    const newId = this.truncateElementId(oldId);
+                    mpComGroupTruncMap.set(oldId, newId);
+                    file.content = file.content.replace(
+                        new RegExp(`<Element ID="${oldId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g'),
+                        `<Element ID="${newId}"`
+                    );
+                    console.log(`  Truncated mpComGroup element ID: '${oldId}' → '${newId}'`);
+                }
+            }
+        });
+        
+        // Update parent references in parentMap to use truncated mpComGroup IDs
+        if (mpComGroupTruncMap.size > 0) {
+            this.mpComGroupParentMap.forEach((parentId, childId) => {
+                if (mpComGroupTruncMap.has(parentId)) {
+                    this.mpComGroupParentMap.set(childId, mpComGroupTruncMap.get(parentId));
+                }
+            });
+            console.log(`  Updated ${mpComGroupTruncMap.size} mpComGroup element ID(s) for 32-char limit`);
+        }
+        
+        // Step 4: Inject Parent property into child mpcomgroup files (AS6 child-declares-parent format)
+        let parentInjectedCount = 0;
+        this.mpComGroupParentMap.forEach((parentId, childId) => {
+            const childInfo = elementMap.get(childId);
+            if (!childInfo) {
+                console.log(`  Skipping parent injection for '${childId}' - no matching mpcomgroup file found (may be a non-group component)`);
+                return;
+            }
+            
+            const { path, file } = childInfo;
+            
+            // Skip if Parent is already set
+            if (file.content.includes('<Property ID="Parent"')) {
+                console.log(`  Parent already set in ${childId}, skipping`);
+                return;
+            }
+            
+            const updatedContent = this.injectMpComGroupParent(file.content, parentId);
+            if (updatedContent !== file.content) {
+                file.content = updatedContent;
+                parentInjectedCount++;
+                console.log(`  Injected Parent="${parentId}" into ${childId} (${path})`);
+                
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'mappservices',
+                    name: 'MpComGroup Parent Reference Added',
+                    description: `Set parent of '${childId}' to '${parentId}' (AS6 reversed hierarchy)`,
+                    file: path,
+                    autoFixed: true,
+                    details: [`Added mapp.Gen/Parent = "${parentId}"`]
+                });
+            }
+        });
+        
+        console.log(`Converted ${convertedCount} MpComGroup file(s), injected parent into ${parentInjectedCount} child file(s)`);
     }
     
     /**
@@ -4253,6 +5070,36 @@ ${mappingGroups}
         result = result.replace(/\n\s*\n\s*\n/g, '\n\n');
         
         return result;
+    }
+
+    /**
+     * Inject a Parent property into an mpcomgroup file content.
+     * In AS6, child components declare their parent (reversed from AS4 where parent declared children).
+     * Adds <Group ID="mapp.Gen"><Property ID="Parent" Value="parentId" /></Group>
+     */
+    injectMpComGroupParent(content, parentId) {
+        // If there's already a mapp.Gen group, add Parent property inside it
+        if (content.includes('<Group ID="mapp.Gen">')) {
+            return content.replace(
+                /(<Group ID="mapp\.Gen">)/,
+                `$1\n      <Property ID="Parent" Value="${parentId}" />`
+            );
+        }
+        
+        // Insert mapp.Gen group with Parent before </Element>
+        if (content.includes('</Element>')) {
+            const parentGroup = `    <Group ID="mapp.Gen">\n      <Property ID="Parent" Value="${parentId}" />\n    </Group>`;
+            return content.replace(
+                '</Element>',
+                `${parentGroup}\n  </Element>`
+            );
+        }
+        
+        // Handle self-closing Element: <Element ID="..." Type="mpcomgroup" />
+        return content.replace(
+            /(<Element ID="[^"]+" Type="mpcomgroup")\s*\/>/,
+            `$1>\n    <Group ID="mapp.Gen">\n      <Property ID="Parent" Value="${parentId}" />\n    </Group>\n  </Element>`
+        );
     }
 
     /**
@@ -4302,6 +5149,827 @@ ${mappingGroups}
     }
 
     /**
+     * Auto-apply MpDataRecorder conversion from AS4 to AS6 format.
+     *
+     * AS4 → AS6 changes per Element:
+     *  1. Add <Group ID="mapp.Gen"> with Enable=TRUE and Parent (from mpComGroupParentMap)
+     *  2. Restructure <Group ID="DataRecorder">:
+     *     - Add Memory Selector (DRAM default)
+     *     - Move SaveInitialValues / DecimalDigits into Record sub-group with defaults
+     *     - Move MaxFileSize / FileNamePattern into File sub-group with defaults
+     *  3. Expand Alarms section: always emit 3 default alarms (RecordingCompleted,
+     *     RecordingAborted, LimitViolated), merging any user-customised properties from AS4.
+     */
+    autoApplyMpDataRecorderConversion() {
+        console.log('Converting MpDataRecorder configuration to AS6 format...');
+
+        const parentMap = this.mpComGroupParentMap || new Map();
+        let convertedFileCount = 0;
+
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.mpdatarecorder') ||
+                file.isBinary || typeof file.content !== 'string') {
+                return;
+            }
+
+            // Parse all Element nodes in this file
+            const elementPattern = /<Element ID="([^"]+)" Type="mpdatarecorder">([\s\S]*?)<\/Element>/g;
+            let match;
+            const elements = [];
+
+            while ((match = elementPattern.exec(file.content)) !== null) {
+                elements.push({ id: match[1], body: match[2], raw: match[0] });
+            }
+
+            if (elements.length === 0) return;
+
+            // Convert each element
+            const convertedElements = elements.map(elem =>
+                this.convertMpDataRecorderElement(elem.id, elem.body, parentMap)
+            );
+
+            // Rebuild file
+            const newContent = `<?xml version="1.0" encoding="utf-8"?>\n<Configuration>\n${convertedElements.join('\n')}\n</Configuration>`;
+
+            if (newContent !== file.content) {
+                file.content = newContent;
+                convertedFileCount++;
+                console.log(`  Converted ${elements.length} element(s) in ${path}`);
+
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'mappservices',
+                    name: 'MpDataRecorder Converted to AS6 Format',
+                    description: `Restructured ${elements.length} MpDataRecorder element(s) to AS6 format`,
+                    file: path,
+                    autoFixed: true,
+                    details: elements.map(e => `Converted element "${e.id}"`)
+                });
+            }
+        });
+
+        console.log(`Converted ${convertedFileCount} MpDataRecorder file(s) to AS6 format`);
+    }
+
+    /**
+     * Convert a single MpDataRecorder Element from AS4 to AS6 structure.
+     *
+     * @param {string} elemId   - Element ID (e.g. "mpLoggerTemperatures")
+     * @param {string} body     - Inner XML of the Element (between <Element …> and </Element>)
+     * @param {Map}    parentMap - mpComGroupParentMap (childId → parentId)
+     * @returns {string} Full AS6 <Element …>…</Element> block
+     */
+    convertMpDataRecorderElement(originalElemId, body, parentMap) {
+        const elemId = this.truncateElementId(originalElemId);
+
+        // ---- 1. Extract AS4 DataRecorder properties ----
+        const as4Props = {};
+        const dataRecorderMatch = body.match(/<Group ID="DataRecorder">([\s\S]*?)<\/Group>/);
+        if (dataRecorderMatch) {
+            const propPattern = /<Property ID="([^"]+)" Value="([^"]*)" \/>/g;
+            let pm;
+            while ((pm = propPattern.exec(dataRecorderMatch[1])) !== null) {
+                as4Props[pm[1]] = pm[2];
+            }
+        }
+
+        // ---- 2. Extract AS4 Alarms section ----
+        const as4Alarms = new Map(); // index (string) → { properties }
+        const alarmsMatch = body.match(/<Selector ID="Alarms" Value="MpAlarmX">([\s\S]*?)<\/Selector>/);
+        if (alarmsMatch) {
+            const alarmGroupPattern = /<Group ID="\[(\d+)\]">([\s\S]*?)<\/Group>/g;
+            let ag;
+            while ((ag = alarmGroupPattern.exec(alarmsMatch[1])) !== null) {
+                const idx = ag[1];
+                const props = {};
+                const apPattern = /<Property ID="([^"]+)"\s*(?:Value="([^"]*)")?\s*\/>/g;
+                let ap;
+                while ((ap = apPattern.exec(ag[2])) !== null) {
+                    props[ap[1]] = ap[2] !== undefined ? ap[2] : '';
+                }
+                as4Alarms.set(idx, props);
+            }
+        }
+
+        // ---- 3. Build mapp.Gen group ----
+        const parentId = parentMap.get(originalElemId) || '';
+        const mappGen = `    <Group ID="mapp.Gen">
+      <Property ID="Enable" Value="TRUE" />
+      <Property ID="Parent"${parentId ? ` Value="${parentId}"` : ''} />
+    </Group>`;
+
+        // ---- 4. Build restructured DataRecorder group ----
+        const maxFileSize = as4Props['MaxFileSize'] || '1000';
+        const fileNamePattern = as4Props['FileNamePattern'] || 'DataRecorder%Y_%m_%d_%H_%M_%S.csv';
+        const saveInitialValues = as4Props['SaveInitialValues'] || 'TRUE';
+        const decimalDigits = as4Props['DecimalDigits'] || '2';
+
+        const dataRecorder = `    <Group ID="DataRecorder">
+      <Selector ID="Memory" Value="DRAM">
+        <Property ID="BufferSize" Value="100" />
+        <Property ID="Interval" Value="10000" />
+      </Selector>
+      <Group ID="Record">
+        <Property ID="AutoSave" Value="TRUE" />
+        <Property ID="SaveInitialValues" Value="${saveInitialValues}" />
+        <Property ID="DecimalDigits" Value="${decimalDigits}" />
+        <Property ID="MeasurementSystem" Value="EU" />
+        <Property ID="UnitDisplay" Value="0" />
+      </Group>
+      <Group ID="File">
+        <Property ID="MaxNumberOfFiles" Value="1" />
+        <Property ID="MaxFileSize" Value="${maxFileSize}" />
+        <Property ID="OverwriteOldestFile" Value="FALSE" />
+        <Property ID="FileNamePattern" Value="${fileNamePattern}" />
+        <Property ID="TimeStampPattern" Value="%Y %m %d %H:%M:%S:%L" />
+        <Property ID="ColumnSeparator" Value=";" />
+        <Property ID="DecimalMark" Value="," />
+        <Selector ID="Format" Value="CSV" />
+      </Group>
+    </Group>`;
+
+        // ---- 5. Build AS6 Alarms section ----
+        const alarmsSection = this.buildMpDataRecorderAlarms(as4Alarms);
+
+        // ---- 6. Assemble ----
+        return `  <Element ID="${elemId}" Type="mpdatarecorder">
+${mappGen}
+${dataRecorder}
+${alarmsSection}
+  </Element>`;
+    }
+
+    /**
+     * Build the full Alarms Selector for an AS6 MpDataRecorder Element.
+     *
+     * Always emits three default alarm groups:
+     *   [0] RecordingCompleted
+     *   [1] RecordingAborted
+     *   [2] LimitViolated
+     *
+     * Properties that the AS4 source defined for a given index are merged in,
+     * overriding the defaults.
+     *
+     * @param {Map} as4Alarms - Map of alarm index → { propId: value } from AS4
+     * @returns {string} Complete <Selector ID="Alarms" …>…</Selector> XML block
+     */
+    buildMpDataRecorderAlarms(as4Alarms) {
+        const defaultAlarms = [
+            { index: 0, name: 'RecordingCompleted', message: '{$BR/mapp/MpDataRecorder/Alarms/RecordingCompleted}', code: '0', severity: '1' },
+            { index: 1, name: 'RecordingAborted',   message: '{$BR/mapp/MpDataRecorder/Alarms/RecordingAborted}',   code: '0', severity: '1' },
+            { index: 2, name: 'LimitViolated',      message: '{$BR/mapp/MpDataRecorder/Alarms/LimitViolated}',      code: '0', severity: '1' }
+        ];
+
+        const groups = defaultAlarms.map(def => {
+            const idx = String(def.index);
+            const as4 = as4Alarms.get(idx) || {};
+
+            // Merge: AS4 values override defaults
+            const name     = as4['Name']     || def.name;
+            const message  = as4['Message']  || def.message;
+            const code     = as4['Code']     || def.code;
+            const severity = as4['Severity'] || def.severity;
+
+            return `      <Group ID="[${idx}]">
+        <Property ID="Name" Value="${name}" />
+        <Property ID="Message" Value="${this.escapeXmlAttribute(message)}" />
+        <Property ID="Code" Value="${code}" />
+        <Property ID="Severity" Value="${severity}" />
+        <Selector ID="Behavior" Value="EdgeAlarm">
+          <Property ID="AutoReset" Value="TRUE" />
+          <Property ID="Acknowledge" Value="1" />
+          <Property ID="Confirm" Value="0" />
+          <Property ID="MultipleInstances" Value="TRUE" />
+          <Property ID="ReactionWhilePending" Value="TRUE" />
+          <Property ID="Async" Value="FALSE" />
+          <Group ID="Recording">
+            <Property ID="InactiveToActive" Value="TRUE" />
+            <Property ID="ActiveToInactive" Value="FALSE" />
+            <Property ID="UnacknowledgedToAcknowledged" Value="TRUE" />
+            <Property ID="UnconfirmedToConfirmed" Value="TRUE" />
+          </Group>
+        </Selector>
+        <Property ID="Disable" Value="FALSE" />
+        <Property ID="AdditionalInformation1" />
+        <Property ID="AdditionalInformation2" />
+      </Group>`;
+        });
+
+        return `    <Selector ID="Alarms" Value="MpAlarmX">
+      <Group ID="mapp.AlarmX.Core.Configuration">
+${groups.join('\n')}
+      </Group>
+    </Selector>`;
+    }
+
+    /**
+     * Auto-fix OPC UA server ConnectionPolicy in .uaserver files.
+     * The ConnectionPolicy must be set to "1" (Current mapp view user) for mappView
+     * HMI applications to properly access PVs through OPC UA.
+     * 
+     * Value="1" = Current mapp view user (correct / default)
+     * Any other value = wrong, must be corrected
+     * If the Selector line is absent entirely, the default applies and no change is needed.
+     */
+    autoApplyUaServerConnectionPolicy() {
+        console.log('Checking OPC UA server ConnectionPolicy in .uaserver files...');
+        
+        let updatedCount = 0;
+        
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.uaserver') || file.isBinary || typeof file.content !== 'string') return;
+            
+            let content = file.content;
+            
+            // Check if ConnectionPolicy is present with a value other than "1"
+            const connectionPolicyMatch = content.match(/<Selector\s+ID="ConnectionPolicy"\s+Value="([^"]*)"\s*\/?>/);
+            
+            if (!connectionPolicyMatch) {
+                // No ConnectionPolicy line found — default value applies, which is correct
+                console.log(`No ConnectionPolicy setting in ${path} — default (Current mapp view user) applies`);
+                return;
+            }
+            
+            const currentValue = connectionPolicyMatch[1];
+            
+            if (currentValue === '1') {
+                console.log(`ConnectionPolicy already set to "1" in ${path}`);
+                return;
+            }
+            
+            // Fix the value to "1"
+            const updatedContent = content.replace(
+                /<Selector\s+ID="ConnectionPolicy"\s+Value="[^"]*"\s*\/?>/,
+                '<Selector ID="ConnectionPolicy" Value="1" />'
+            );
+            
+            if (updatedContent !== content) {
+                file.content = updatedContent;
+                updatedCount++;
+                console.log(`Fixed ConnectionPolicy from "${currentValue}" to "1" in ${path}`);
+                
+                this.analysisResults.push({
+                    severity: 'warning',
+                    category: 'mappview',
+                    name: 'OPC UA ConnectionPolicy Fixed',
+                    description: `Changed ConnectionPolicy from "${currentValue}" to "1" (Current mapp view user). Required for mappView OPC UA PV access.`,
+                    file: path,
+                    autoFixed: true,
+                    details: [`ConnectionPolicy changed from "${currentValue}" to "1" (Current mapp view user)`]
+                });
+            }
+        });
+        
+        if (updatedCount > 0) {
+            console.log(`ConnectionPolicy fixed in ${updatedCount} .uaserver file(s)`);
+        } else {
+            console.log('All .uaserver files have correct ConnectionPolicy or none found');
+        }
+    }
+
+    /**
+     * Auto-fix SecurityPolicy and MessageSecurityMode in .uaserver files.
+     * AS6 defaults:
+     *   SecurityPolicy = "BestAvailable" (AS4 often has "None")
+     *   MessageSecurityMode = "4" (AS4 often has "1")
+     */
+    autoApplyUaServerSecuritySettings() {
+        console.log('Checking SecurityPolicy and MessageSecurityMode in .uaserver files...');
+
+        let updatedCount = 0;
+
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.uaserver') || file.isBinary || typeof file.content !== 'string') return;
+
+            let content = file.content;
+            let changed = false;
+            const details = [];
+
+            // Fix SecurityPolicy: should be "BestAvailable"
+            const secPolicyMatch = content.match(/<Selector\s+ID="SecurityPolicy"\s+Value="([^"]*)"\s*\/?>/); 
+            if (secPolicyMatch && secPolicyMatch[1] !== 'BestAvailable') {
+                const oldValue = secPolicyMatch[1];
+                content = content.replace(
+                    /<Selector\s+ID="SecurityPolicy"\s+Value="[^"]*"\s*\/?>/,
+                    '<Selector ID="SecurityPolicy" Value="BestAvailable" />'
+                );
+                details.push(`SecurityPolicy changed from "${oldValue}" to "BestAvailable"`);
+                changed = true;
+            }
+
+            // Fix MessageSecurityMode: should be "4"
+            const msgSecMatch = content.match(/<Selector\s+ID="MessageSecurityMode"\s+Value="([^"]*)"\s*\/?>/); 
+            if (msgSecMatch && msgSecMatch[1] !== '4') {
+                const oldValue = msgSecMatch[1];
+                content = content.replace(
+                    /<Selector\s+ID="MessageSecurityMode"\s+Value="[^"]*"\s*\/?>/,
+                    '<Selector ID="MessageSecurityMode" Value="4" />'
+                );
+                details.push(`MessageSecurityMode changed from "${oldValue}" to "4"`);
+                changed = true;
+            }
+
+            if (changed) {
+                file.content = content;
+                updatedCount++;
+                console.log(`Fixed security settings in ${path}: ${details.join(', ')}`);
+
+                this.analysisResults.push({
+                    severity: 'warning',
+                    category: 'mappview',
+                    name: 'OPC UA Security Settings Updated',
+                    description: `Updated .uaserver security settings to AS6 defaults. ${details.join('. ')}.`,
+                    file: path,
+                    autoFixed: true,
+                    details: details
+                });
+            }
+        });
+
+        if (updatedCount > 0) {
+            console.log(`Security settings fixed in ${updatedCount} .uaserver file(s)`);
+        } else {
+            console.log('All .uaserver files have correct security settings or none found');
+        }
+    }
+
+    /**
+     * Ensure a .uaserver file exists in each mappView folder under Physical.
+     * If no .uaserver file is found, creates OpcUaServer.uaserver with AS6 defaults
+     * and adds a reference in the mappView Package.pkg.
+     */
+    autoApplyEnsureUaServerFile() {
+        console.log('Checking for .uaserver files in mappView folders...');
+
+        // Find all mappView folders under Physical by looking for Package.pkg files
+        // in paths like Physical/.../mappView/Package.pkg
+        const mappViewFolders = new Map(); // folderPath -> { hasPkg: bool, hasUaServer: bool, pkgPath: string }
+
+        this.projectFiles.forEach((file, path) => {
+            const pathLower = path.toLowerCase().replace(/\\/g, '/');
+            // Match paths under Physical that contain /mappView/
+            const mvMatch = pathLower.match(/^(.+\/physical\/.+\/mappview)\/(.+)$/i);
+            if (!mvMatch) return;
+
+            // Get the original-case folder path
+            const folderPath = path.replace(/\\/g, '/').substring(0, mvMatch[1].length);
+            
+            if (!mappViewFolders.has(folderPath)) {
+                mappViewFolders.set(folderPath, { hasPkg: false, hasUaServer: false, pkgPath: null });
+            }
+
+            const info = mappViewFolders.get(folderPath);
+            const fileName = mvMatch[2].toLowerCase();
+
+            if (fileName === 'package.pkg') {
+                info.hasPkg = true;
+                info.pkgPath = path;
+            }
+            if (fileName.endsWith('.uaserver')) {
+                info.hasUaServer = true;
+            }
+        });
+
+        let createdCount = 0;
+
+        mappViewFolders.forEach((info, folderPath) => {
+            if (info.hasUaServer) {
+                console.log(`mappView folder already has .uaserver: ${folderPath}`);
+                return;
+            }
+
+            // Create the .uaserver file
+            const uaServerPath = folderPath + '/OpcUaServer.uaserver';
+            this.projectFiles.set(uaServerPath, {
+                content: this.getUaServerTemplate(),
+                isBinary: false,
+                type: 'opcua'
+            });
+            console.log(`Created ${uaServerPath}`);
+
+            // Add reference in Package.pkg if it exists
+            if (info.hasPkg && info.pkgPath) {
+                const pkg = this.projectFiles.get(info.pkgPath);
+                if (pkg && typeof pkg.content === 'string') {
+                    // Check if reference already exists
+                    if (!pkg.content.includes('OpcUaServer.uaserver')) {
+                        // Insert before </Objects>
+                        pkg.content = pkg.content.replace(
+                            /(<\/Objects>)/,
+                            '    <Object Type="File">OpcUaServer.uaserver</Object>\n  $1'
+                        );
+                        console.log(`Added OpcUaServer.uaserver reference to ${info.pkgPath}`);
+                    }
+                }
+            }
+
+            createdCount++;
+
+            this.analysisResults.push({
+                severity: 'info',
+                category: 'mappview',
+                name: 'OPC UA Server Configuration Created',
+                description: 'Created OpcUaServer.uaserver with AS6 default settings (SecurityPolicy=BestAvailable, MessageSecurityMode=4, ConnectionPolicy=1).',
+                file: uaServerPath,
+                autoFixed: true,
+                details: [
+                    'Created OpcUaServer.uaserver with AS6 defaults',
+                    'SecurityPolicy = BestAvailable',
+                    'MessageSecurityMode = 4 (SignAndEncrypt)',
+                    'ConnectionPolicy = 1 (Current mapp view user)'
+                ]
+            });
+        });
+
+        if (createdCount > 0) {
+            console.log(`Created .uaserver file in ${createdCount} mappView folder(s)`);
+        } else {
+            console.log('All mappView folders have .uaserver files or no mappView folders found');
+        }
+    }
+
+    /**
+     * Get OpcUaServer.uaserver template content for AS6 mappView
+     */
+    getUaServerTemplate() {
+        return `<?xml version="1.0" encoding="utf-8"?>
+<?AutomationStudio FileVersion="4.9"?>
+<Configuration>
+  <Element ID="OpcUaServerConnections" Type="UASERVER">
+    <Group ID="DefaultOpcUaServer">
+      <Property ID="Alias" />
+      <Property ID="Hostname" />
+      <Property ID="IPAddress" Value="127.0.0.1" />
+      <Property ID="Port" Value="4840" />
+      <Property ID="EndpointUrl" />
+      <Property ID="DefaultNamespace" Value="http://br-automation.com/OpcUa/PLC/PV/" />
+      <Selector ID="ConnectionPolicy" Value="1" />
+      <Selector ID="SecurityPolicy" Value="BestAvailable" />
+      <Selector ID="MessageSecurityMode" Value="4" />
+      <Property ID="SSLConfiguration" />
+    </Group>
+  </Element>
+</Configuration>`;
+    }
+
+    /**
+     * Auto-fix SecurityPolicy "None" in .uacfg files.
+     * The "None" security policy must be enabled (Value="1") in the MessageSecurity
+     * SecurityPolicies group for mappView HMI applications to access PVs via OPC UA.
+     *
+     * If the Property is present with Value != "1", it is corrected.
+     * If the Property is missing entirely, it is inserted into the SecurityPolicies group.
+     */
+    autoApplyUaCfgSecurityPolicyNone() {
+        console.log('Checking SecurityPolicy "None" in .uacfg files...');
+        
+        let updatedCount = 0;
+        
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.uacfg') || file.isBinary || typeof file.content !== 'string') return;
+            
+            let content = file.content;
+            
+            // Look for the MessageSecurity > SecurityPolicies group
+            // We need to target the first SecurityPolicies group (under MessageSecurity),
+            // not the second one (under Authentication)
+            const msgSecurityMatch = content.match(
+                /(<Group\s+ID="MessageSecurity">\s*<Group\s+ID="SecurityPolicies">)([\s\S]*?)(<\/Group>)/
+            );
+            
+            if (!msgSecurityMatch) {
+                console.log(`No MessageSecurity/SecurityPolicies group found in ${path}`);
+                return;
+            }
+            
+            const policiesContent = msgSecurityMatch[2];
+            
+            // Check if None property exists
+            const noneMatch = policiesContent.match(/<Property\s+ID="None"\s+Value="([^"]*)"\s*\/?>/);            
+            
+            if (noneMatch && noneMatch[1] === '1') {
+                console.log(`SecurityPolicy "None" already enabled in ${path}`);
+                return;
+            }
+            
+            let updatedContent;
+            let changeDetail;
+            
+            if (noneMatch) {
+                // Property exists but with wrong value — fix it
+                const oldValue = noneMatch[1];
+                updatedContent = content.replace(
+                    /(<Group\s+ID="MessageSecurity">\s*<Group\s+ID="SecurityPolicies">\s*)<Property\s+ID="None"\s+Value="[^"]*"\s*\/?>/,
+                    '$1<Property ID="None" Value="1" />'
+                );
+                changeDetail = `Changed SecurityPolicy "None" from "${oldValue}" to "1"`;
+            } else {
+                // Property is missing — insert it as the first entry in SecurityPolicies
+                updatedContent = content.replace(
+                    /(<Group\s+ID="MessageSecurity">\s*<Group\s+ID="SecurityPolicies">)/,
+                    '$1\n          <Property ID="None" Value="1" />'
+                );
+                changeDetail = 'Added SecurityPolicy "None" with Value="1"';
+            }
+            
+            if (updatedContent !== content) {
+                file.content = updatedContent;
+                updatedCount++;
+                console.log(`${changeDetail} in ${path}`);
+                
+                this.analysisResults.push({
+                    severity: 'warning',
+                    category: 'opcua',
+                    name: 'OPC UA SecurityPolicy "None" Enabled',
+                    description: `${changeDetail}. Required for mappView OPC UA PV access.`,
+                    file: path,
+                    autoFixed: true,
+                    details: [changeDetail]
+                });
+            }
+        });
+        
+        if (updatedCount > 0) {
+            console.log(`SecurityPolicy "None" fixed in ${updatedCount} .uacfg file(s)`);
+        } else {
+            console.log('All .uacfg files have SecurityPolicy "None" enabled or none found');
+        }
+    }
+
+    /**
+     * Auto-add BR_Engineer role to every user in .user files.
+     * In AS6, the BR_Engineer role is required for mappView HMI applications
+     * to have access to process variables (PVs) through OPC UA.
+     * 
+     * For each user element in .user files, this method checks if BR_Engineer
+     * is already assigned. If not, it adds it as an additional Role entry.
+     */
+    autoApplyUserBREngineerRole() {
+        console.log('Adding BR_Engineer role to all users in .user files...');
+        
+        let updatedFileCount = 0;
+        let updatedUserCount = 0;
+        
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.user') || file.isBinary || typeof file.content !== 'string') return;
+            
+            let content = file.content;
+            
+            // Skip if file doesn't look like a user configuration
+            if (!content.includes('<Element') || !content.includes('Type="User"')) return;
+            
+            // Already has BR_Engineer for all users? Quick check
+            // We need to process per-user, so we can't just do a single check
+            
+            let fileModified = false;
+            const usersUpdated = [];
+            
+            // Match each Element block for users
+            // Process each <Group ID="Roles"> block within user elements
+            const elementRegex = /<Element\s+ID="([^"]*)"\s+Type="User"[^>]*>([\s\S]*?)<\/Element>/g;
+            let match;
+            
+            while ((match = elementRegex.exec(content)) !== null) {
+                const userId = match[1];
+                const elementContent = match[2];
+                const elementFullMatch = match[0];
+                
+                // Check if this user already has BR_Engineer
+                if (elementContent.includes('"BR_Engineer"')) {
+                    console.log(`User "${userId}" already has BR_Engineer role in ${path}`);
+                    continue;
+                }
+                
+                // Find the Roles group
+                const rolesGroupMatch = elementContent.match(/<Group\s+ID="Roles">[\s\S]*?<\/Group>/);
+                if (!rolesGroupMatch) {
+                    console.log(`User "${userId}" has no Roles group in ${path}, skipping`);
+                    continue;
+                }
+                
+                const rolesGroup = rolesGroupMatch[0];
+                
+                // Count existing roles to determine the next Role index
+                const roleEntries = rolesGroup.match(/Role\[(\d+)\]/g) || [];
+                const maxIndex = roleEntries.reduce((max, entry) => {
+                    const idx = parseInt(entry.match(/\d+/)[0]);
+                    return Math.max(max, idx);
+                }, 0);
+                const newIndex = maxIndex + 1;
+                
+                // Insert the new role before </Group>
+                const newRoleEntry = `      <Property ID="Role[${newIndex}]" Value="BR_Engineer" />`;
+                const updatedRolesGroup = rolesGroup.replace(
+                    '</Group>',
+                    newRoleEntry + '\n    </Group>'
+                );
+                
+                // Replace in the element
+                const updatedElement = elementFullMatch.replace(rolesGroup, updatedRolesGroup);
+                content = content.replace(elementFullMatch, updatedElement);
+                
+                usersUpdated.push(userId);
+                updatedUserCount++;
+                fileModified = true;
+                console.log(`Added BR_Engineer role (Role[${newIndex}]) to user "${userId}" in ${path}`);
+            }
+            
+            if (fileModified) {
+                file.content = content;
+                updatedFileCount++;
+                
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'security',
+                    name: 'BR_Engineer Role Added',
+                    description: `Added BR_Engineer role to ${usersUpdated.length} user(s): ${usersUpdated.join(', ')}. Required for mappView OPC UA PV access.`,
+                    file: path,
+                    autoFixed: true,
+                    details: usersUpdated.map(u => `Added BR_Engineer to user "${u}"`)
+                });
+            }
+        });
+        
+        if (updatedFileCount > 0) {
+            console.log(`BR_Engineer role added in ${updatedFileCount} .user file(s), ${updatedUserCount} user(s) updated`);
+        } else {
+            console.log('No .user files found or all users already have BR_Engineer role');
+        }
+    }
+
+    /**
+     * Auto-apply mapp configuration file transforms for AS6.
+     * Removes or renames XML elements based on configTransformRules.
+     */
+    autoApplyConfigTransforms() {
+        console.log('Applying mapp config file transforms...');
+        
+        const rules = DeprecationDatabase.configTransformRules;
+        if (!rules || rules.length === 0) {
+            console.log('No config transform rules defined');
+            return;
+        }
+
+        let totalChanges = 0;
+
+        this.projectFiles.forEach((file, filePath) => {
+            if (file.isBinary) return;
+            // Only process XML-like config files in Logical/ paths
+            if (!filePath.toLowerCase().includes('logical/')) return;
+            const ext = filePath.toLowerCase().split('.').pop();
+            if (!['xml', 'eventbinding', 'alarmcfg', 'recipe', 'config', 'usercfg'].includes(ext) && 
+                !file.content.trim().startsWith('<?xml') && !file.content.trim().startsWith('<')) return;
+
+            let content = file.content;
+            let modified = false;
+            const appliedRules = [];
+
+            for (const rule of rules) {
+                // Check if this file matches the rule's file pattern
+                const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || '';
+                if (!rule.filePattern.test(fileName) && !rule.filePattern.test(filePath)) continue;
+
+                if (rule.action === 'remove_element') {
+                    // Remove XML element and its contents (handles self-closing and nested)
+                    const elementName = rule.elementPath;
+                    // Match self-closing: <Element ... />
+                    const selfClosingPattern = new RegExp(
+                        `[ \\t]*<${this.escapeRegex(elementName)}\\b[^>]*/>[ \\t]*\\r?\\n?`, 'gi'
+                    );
+                    // Match open/close: <Element ...>...</Element>
+                    const openClosePattern = new RegExp(
+                        `[ \\t]*<${this.escapeRegex(elementName)}\\b[^>]*>[\\s\\S]*?</${this.escapeRegex(elementName)}>[ \\t]*\\r?\\n?`, 'gi'
+                    );
+
+                    const before = content;
+                    content = content.replace(selfClosingPattern, '');
+                    content = content.replace(openClosePattern, '');
+                    if (content !== before) {
+                        modified = true;
+                        totalChanges++;
+                        appliedRules.push(rule);
+                        console.log(`Removed <${elementName}> from ${filePath}`);
+                    }
+                } else if (rule.action === 'rename_element') {
+                    // Rename element tags
+                    const oldEl = rule.oldElement;
+                    const newEl = rule.newElement;
+                    // Self-closing
+                    const selfPattern = new RegExp(
+                        `(<)${this.escapeRegex(oldEl)}(\\b[^>]*/>)`, 'gi'
+                    );
+                    // Open tag
+                    const openPattern = new RegExp(
+                        `(<)${this.escapeRegex(oldEl)}(\\b[^>]*>)`, 'gi'
+                    );
+                    // Close tag
+                    const closePattern = new RegExp(
+                        `(</)${this.escapeRegex(oldEl)}(>)`, 'gi'
+                    );
+
+                    const before = content;
+                    content = content.replace(selfPattern, `$1${newEl}$2`);
+                    content = content.replace(openPattern, `$1${newEl}$2`);
+                    content = content.replace(closePattern, `$1${newEl}$2`);
+                    if (content !== before) {
+                        modified = true;
+                        totalChanges++;
+                        appliedRules.push(rule);
+                        console.log(`Renamed <${oldEl}> → <${newEl}> in ${filePath}`);
+                    }
+                }
+            }
+
+            if (modified) {
+                file.content = content;
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'config_transform',
+                    name: 'Mapp Config Updated',
+                    description: `Applied ${appliedRules.length} config transform(s) to ${filePath}`,
+                    file: filePath,
+                    autoFixed: true,
+                    details: appliedRules.map(r => r.description)
+                });
+            }
+        });
+
+        console.log(`Config transforms complete: ${totalChanges} changes applied`);
+    }
+
+    /**
+     * Auto-remove passwords from .user files.
+     * AS6 uses a different password hashing algorithm, so existing hashes are invalid.
+     * Passwords are cleared to force the user to reconfigure them in AS6.
+     */
+    autoApplyUserPasswordRemoval() {
+        console.log('Removing passwords from .user files (incompatible hashing)...');
+        
+        let updatedFileCount = 0;
+        let updatedUserCount = 0;
+        
+        this.projectFiles.forEach((file, path) => {
+            if (!path.toLowerCase().endsWith('.user') || file.isBinary || typeof file.content !== 'string') return;
+            
+            let content = file.content;
+            
+            // Skip if file doesn't look like a user configuration
+            if (!content.includes('<Element') || !content.includes('Type="User"')) return;
+            
+            let fileModified = false;
+            const usersCleared = [];
+            
+            // Match each Element block for users
+            const elementRegex = /<Element\s+ID="([^"]*)"\s+Type="User"[^>]*>[\s\S]*?<\/Element>/g;
+            let match;
+            
+            while ((match = elementRegex.exec(content)) !== null) {
+                const userId = match[1];
+                const elementFullMatch = match[0];
+                
+                // Find Password property with a non-empty Value
+                const passwordMatch = elementFullMatch.match(/<Property\s+ID="Password"\s+Value="([^"]*)"([^/]*)\/>/); 
+                if (!passwordMatch || passwordMatch[1] === '') {
+                    continue; // Already empty or no password property
+                }
+                
+                // Clear the password value and update description
+                const updatedElement = elementFullMatch.replace(
+                    /<Property\s+ID="Password"\s+Value="[^"]*"[^/]*\/>/,
+                    '<Property ID="Password" Value="" Description="Removed during AS6 conversion - must be reconfigured" />'
+                );
+                
+                content = content.replace(elementFullMatch, updatedElement);
+                usersCleared.push(userId);
+                updatedUserCount++;
+                fileModified = true;
+                console.log(`Cleared password for user "${userId}" in ${path}`);
+            }
+            
+            if (fileModified) {
+                file.content = content;
+                updatedFileCount++;
+                
+                this.analysisResults.push({
+                    severity: 'warning',
+                    category: 'security',
+                    name: 'User Passwords Removed',
+                    description: `Cleared passwords for ${usersCleared.length} user(s): ${usersCleared.join(', ')}. AS6 uses a different hashing algorithm — passwords MUST be reconfigured manually in Automation Studio 6.`,
+                    file: path,
+                    autoFixed: true,
+                    details: usersCleared.map(u => `Password cleared for user "${u}" — must be set again in AS6`)
+                });
+            }
+        });
+        
+        if (updatedFileCount > 0) {
+            console.log(`Passwords removed from ${updatedFileCount} .user file(s), ${updatedUserCount} user(s) affected`);
+        } else {
+            console.log('No .user files with passwords found');
+        }
+    }
+
+    /**
      * Auto-remove deprecated function blocks that are not supported in AS6
      * 
      * This method:
@@ -4322,20 +5990,24 @@ ${mappingGroups}
         
         let removedInstances = 0;
         let commentedUsages = 0;
-        const instanceNames = new Set(); // Track instance names for usage detection
+        const instanceMap = new Map(); // instanceName → { fbName, fb }
         
-        // Step 1: Find and collect all instance names from .var and .typ files
+        // Step 1: Find and collect all instance names from .var, .typ, .st, .fun, .prg files
         deprecatedFBs.forEach(fb => {
             if (!fb.autoRemove) return;
             
             const fbName = fb.name;
-            const fbPattern = new RegExp(`^\\s*(\\w+)\\s*:\\s*${this.escapeRegex(fbName)}\\s*;?\\s*$`, 'gm');
+            // Relaxed pattern: match "instanceName : FBName" with optional semicolons, comments, pragmas
+            // Handles: instanceName : FBType; (* comment *)
+            //          instanceName : FBType; {REDUND_UNREPLICABLE}
+            //          instanceName : FBType;
+            const fbPattern = new RegExp(`^\\s*(\\w+)\\s*:\\s*${this.escapeRegex(fbName)}\\b[^\\n]*$`, 'gm');
             
             this.projectFiles.forEach((file, filePath) => {
                 if (file.isBinary) return;
                 
                 const ext = filePath.toLowerCase().split('.').pop();
-                if (!['var', 'typ'].includes(ext)) return;
+                if (!['var', 'typ', 'st', 'fun', 'prg'].includes(ext)) return;
                 
                 let content = file.content;
                 let match;
@@ -4343,27 +6015,27 @@ ${mappingGroups}
                 // Find all instance declarations
                 while ((match = fbPattern.exec(content)) !== null) {
                     const instanceName = match[1];
-                    instanceNames.add(instanceName);
+                    instanceMap.set(instanceName, { fbName, fb });
                     console.log(`Found deprecated FB instance: ${instanceName} : ${fbName} in ${filePath}`);
                 }
             });
         });
         
-        console.log(`Found ${instanceNames.size} deprecated function block instances to process`);
+        console.log(`Found ${instanceMap.size} deprecated function block instances to process`);
         
-        // Step 2: Remove declarations from .var and .typ files
+        // Step 2: Remove declarations from .var, .typ, .st, .fun, .prg files
         deprecatedFBs.forEach(fb => {
             if (!fb.autoRemove) return;
             
             const fbName = fb.name;
-            // Pattern to match: instanceName : FunctionBlockName; (with optional whitespace and comments)
-            const declarationPattern = new RegExp(`^\\s*\\w+\\s*:\\s*${this.escapeRegex(fbName)}\\s*;?\\s*(?:\\/\\/.*)?$`, 'gm');
+            // Relaxed pattern: match any line declaring an instance of this FB type
+            const declarationPattern = new RegExp(`^\\s*\\w+\\s*:\\s*${this.escapeRegex(fbName)}\\b[^\\n]*$`, 'gm');
             
             this.projectFiles.forEach((file, filePath) => {
                 if (file.isBinary) return;
                 
                 const ext = filePath.toLowerCase().split('.').pop();
-                if (!['var', 'typ'].includes(ext)) return;
+                if (!['var', 'typ', 'st', 'fun', 'prg'].includes(ext)) return;
                 
                 let content = file.content;
                 const originalContent = content;
@@ -4394,7 +6066,7 @@ ${mappingGroups}
         });
         
         // Step 3: Comment out usages in source code files
-        if (instanceNames.size > 0) {
+        if (instanceMap.size > 0) {
             this.projectFiles.forEach((file, filePath) => {
                 if (file.isBinary) return;
                 
@@ -4411,24 +6083,30 @@ ${mappingGroups}
                     const line = lines[i];
                     let shouldComment = false;
                     let matchedInstance = null;
+                    let matchedFbName = null;
+                    
+                    // Skip lines already commented
+                    if (line.trim().startsWith('//') || line.trim().startsWith('(*')) {
+                        newLines.push(line);
+                        continue;
+                    }
                     
                     // Check if this line contains any of the deprecated instances
-                    for (const instanceName of instanceNames) {
+                    for (const [instanceName, info] of instanceMap) {
                         // Pattern to match instance usage: instanceName.xxx or instanceName(
-                        // Also match assignment to instance parameters: instanceName.param := 
                         const usagePattern = new RegExp(`\\b${this.escapeRegex(instanceName)}\\s*[.(]`, 'i');
-                        const assignPattern = new RegExp(`\\b${this.escapeRegex(instanceName)}\\b`, 'i');
                         
-                        if (usagePattern.test(line) || assignPattern.test(line)) {
+                        if (usagePattern.test(line)) {
                             shouldComment = true;
                             matchedInstance = instanceName;
+                            matchedFbName = info.fbName;
                             break;
                         }
                     }
                     
-                    if (shouldComment && !line.trim().startsWith('//') && !line.trim().startsWith('(*')) {
-                        // Comment out the line with explanation
-                        newLines.push(`(* AS6-REMOVED: ${line} *) // TODO: MpAlarmXAcknowledgeAll not supported in AS6 - requires manual reimplementation`);
+                    if (shouldComment) {
+                        // Comment out the line with explanation using the actual FB name
+                        newLines.push(`(* AS6-REMOVED: ${line} *) // TODO: ${matchedFbName} not supported in AS6 - requires manual reimplementation`);
                         modified = true;
                         commentedUsages++;
                         console.log(`Commented out usage in ${filePath}: ${line.trim()}`);
@@ -4449,13 +6127,180 @@ ${mappingGroups}
                         file: filePath,
                         autoFixed: true,
                         notes: 'Lines containing deprecated function block instances have been commented out. Manual reimplementation required.',
-                        details: [`Search for "AS6-REMOVED" or "TODO: MpAlarmXAcknowledgeAll" in the file`]
+                        details: [`Search for "AS6-REMOVED" in the file for commented-out lines`]
                     });
                 }
             });
         }
         
         console.log(`Deprecated function block removal complete: ${removedInstances} declarations removed, ${commentedUsages} usages commented out`);
+    }
+
+    /**
+     * Auto-comment lines using deprecated struct members that were removed in AS6
+     * 
+     * This handles cases where struct members existed in AS4 but were removed in AS6:
+     * - McCamAutDefineType.DataSize (removed in AS6)
+     * 
+     * Lines accessing these members will cause compile errors in AS6 and must be commented out.
+     */
+    autoCommentDeprecatedStructMembers() {
+        console.log('Commenting deprecated struct member usages...');
+        
+        const deprecatedMembers = DeprecationDatabase.deprecatedStructMembers || [];
+        if (deprecatedMembers.length === 0) {
+            console.log('No deprecated struct members defined');
+            return;
+        }
+        
+        let commentedCount = 0;
+        
+        deprecatedMembers.forEach(member => {
+            if (!member.autoComment) return;
+            
+            const memberPattern = new RegExp(member.pattern, 'gi');
+            
+            this.projectFiles.forEach((file, filePath) => {
+                if (file.isBinary) return;
+                
+                // Only process ST source files
+                const ext = filePath.toLowerCase().split('.').pop();
+                if (!['st', 'fun', 'prg'].includes(ext)) return;
+                
+                let content = file.content;
+                const lines = content.split('\n');
+                let modified = false;
+                const newLines = [];
+                
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    
+                    // Check if line contains the deprecated member pattern
+                    if (memberPattern.test(line) && !line.trim().startsWith('//') && !line.trim().startsWith('(*')) {
+                        // Comment out the line with explanation
+                        const todoMsg = member.todoMessage || `${member.structType}.${member.memberName} removed in AS6`;
+                        newLines.push(`(* AS6-REMOVED: ${line} *) // TODO: ${todoMsg}`);
+                        modified = true;
+                        commentedCount++;
+                        console.log(`Commented deprecated member usage in ${filePath}: ${line.trim()}`);
+                        // Reset regex lastIndex for next iteration
+                        memberPattern.lastIndex = 0;
+                    } else {
+                        newLines.push(line);
+                        // Reset regex lastIndex for next iteration
+                        memberPattern.lastIndex = 0;
+                    }
+                }
+                
+                if (modified) {
+                    file.content = newLines.join('\n');
+                    
+                    this.analysisResults.push({
+                        type: 'deprecated_struct_member',
+                        severity: member.severity,
+                        category: 'struct_member',
+                        name: `${member.structType}.${member.memberName}`,
+                        description: member.description,
+                        file: filePath,
+                        autoFixed: true,
+                        notes: member.notes,
+                        details: [`Search for "AS6-REMOVED" or "TODO: ${member.todoMessage}" in the file`]
+                    });
+                }
+            });
+        });
+        
+        console.log(`Deprecated struct member comment complete: ${commentedCount} usages commented out`);
+    }
+
+    /**
+     * Auto-comment removed FB inputs/outputs in AS6.
+     * Uses fbInterfaceChanges entries where autoComment is true.
+     */
+    autoCommentRemovedFBInputs() {
+        console.log('Commenting removed FB inputs/outputs...');
+        
+        const fbChanges = DeprecationDatabase.fbInterfaceChanges || [];
+        const autoCommentChanges = fbChanges.filter(c => c.autoComment);
+        if (autoCommentChanges.length === 0) {
+            console.log('No auto-comment FB interface changes defined');
+            return;
+        }
+
+        // Collect all instance names for affected FB types
+        const changesByType = {};
+        autoCommentChanges.forEach(change => {
+            if (!changesByType[change.fbType]) changesByType[change.fbType] = [];
+            changesByType[change.fbType].push(change);
+        });
+
+        // Find all instances from .var/.typ files
+        const instanceMap = {}; // fbType → Set of instance names
+        this.projectFiles.forEach((file, filePath) => {
+            if (file.isBinary) return;
+            const ext = filePath.toLowerCase().split('.').pop();
+            if (!['var', 'typ', 'st', 'fun', 'prg'].includes(ext)) return;
+
+            for (const fbType of Object.keys(changesByType)) {
+                const declPattern = new RegExp(`\\b(\\w+)\\s*:\\s*${this.escapeRegex(fbType)}\\b`, 'gm');
+                let match;
+                while ((match = declPattern.exec(file.content)) !== null) {
+                    if (!instanceMap[fbType]) instanceMap[fbType] = new Set();
+                    instanceMap[fbType].add(match[1]);
+                }
+            }
+        });
+
+        let commentedCount = 0;
+
+        // Process ST source files
+        this.projectFiles.forEach((file, filePath) => {
+            if (file.isBinary) return;
+            const ext = filePath.toLowerCase().split('.').pop();
+            if (!['st', 'fun', 'prg'].includes(ext)) return;
+
+            const lines = file.content.split('\n');
+            let modified = false;
+            const newLines = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.trim().startsWith('//') || line.trim().startsWith('(*')) {
+                    newLines.push(line);
+                    continue;
+                }
+
+                let commented = false;
+                for (const [fbType, instances] of Object.entries(instanceMap)) {
+                    if (commented) break;
+                    for (const instanceName of instances) {
+                        if (commented) break;
+                        for (const change of changesByType[fbType]) {
+                            const pattern = new RegExp(
+                                `\\b${this.escapeRegex(instanceName)}\\.${this.escapeRegex(change.memberName)}\\b`
+                            );
+                            if (pattern.test(line)) {
+                                const todoMsg = change.todoMessage || `${change.fbType}.${change.memberName} removed in AS6`;
+                                newLines.push(`(* AS6-REMOVED: ${line} *) // TODO: ${todoMsg}`);
+                                modified = true;
+                                commented = true;
+                                commentedCount++;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!commented) {
+                    newLines.push(line);
+                }
+            }
+
+            if (modified) {
+                file.content = newLines.join('\n');
+            }
+        });
+
+        console.log(`Removed FB inputs comment complete: ${commentedCount} usages commented out`);
     }
 
     /**
@@ -4612,6 +6457,93 @@ ${mappingGroups}
     }
 
     /**
+     * Upgrade OPC UA Information Model from 1.0 to 2.0 in .hw files
+     * AS6 requires OPC UA Information Model 2.0. AS4 projects using Information Model 1.0
+     * have <Parameter ID="OpcUaInformationModels_PV_Version" Value="1" /> in the CPU module.
+     * Upgrading bumps this to Value="2" and adds the new v2.0 facet/type parameters
+     * (OpcUaInformationModel_Facet, OpcUaInformationModel_TypeInformation,
+     * OpcUaInformationModel_BaseObjectTypeForStructures) which default to "0".
+     */
+    autoApplyOpcUaInformationModelUpgrade() {
+        console.log('Upgrading OPC UA Information Model from 1.0 to 2.0 in .hw files...');
+
+        let modifiedFiles = 0;
+
+        this.projectFiles.forEach((file, filePath) => {
+            if (file.isBinary) return;
+
+            const ext = filePath.toLowerCase().split('.').pop();
+            if (ext !== 'hw') return;
+
+            let content = file.content;
+            let originalContent = content;
+            let upgradedModules = 0;
+
+            // Find Module blocks that configure the OPC UA Information Model
+            const modulePattern = /<Module\s+[^>]*>[\s\S]*?<\/Module>/gi;
+
+            content = content.replace(modulePattern, (moduleMatch) => {
+                // Only touch modules currently using Information Model v1.0
+                const pvVersionPattern = /<Parameter\s+ID="OpcUaInformationModels_PV_Version"\s+Value="1"\s*\/>/i;
+                if (!pvVersionPattern.test(moduleMatch)) {
+                    return moduleMatch;
+                }
+
+                let moduleContent = moduleMatch;
+
+                // Bump the Information Model version from 1 (v1.0) to 2 (v2.0)
+                moduleContent = moduleContent.replace(
+                    /(<Parameter\s+ID="OpcUaInformationModels_PV_Version"\s+Value=")1("\s*\/>)/i,
+                    '$12$2'
+                );
+
+                // AS6 Information Model v2.0 introduces additional facet/type parameters.
+                // Add them (with their default values) right after the PV_Version parameter if missing.
+                const additionalParams = [
+                    { id: 'OpcUaInformationModel_Facet', value: '0' },
+                    { id: 'OpcUaInformationModel_TypeInformation', value: '0' },
+                    { id: 'OpcUaInformationModel_BaseObjectTypeForStructures', value: '0' }
+                ];
+
+                const missingParams = additionalParams.filter(p =>
+                    !new RegExp(`<Parameter\\s+ID="${p.id}"\\s+Value="[^"]*"\\s*/>`, 'i').test(moduleContent)
+                );
+
+                if (missingParams.length > 0) {
+                    const insertion = missingParams.map(p => `\n    <Parameter ID="${p.id}" Value="${p.value}" />`).join('');
+                    moduleContent = moduleContent.replace(
+                        /(<Parameter\s+ID="OpcUaInformationModels_PV_Version"\s+Value="2"\s*\/>)/i,
+                        `$1${insertion}`
+                    );
+                }
+
+                upgradedModules++;
+                console.log(`  Upgraded OPC UA Information Model to v2.0 in ${filePath}`);
+                return moduleContent;
+            });
+
+            if (content !== originalContent) {
+                file.content = content;
+                modifiedFiles++;
+
+                this.analysisResults.push({
+                    type: 'opcua_information_model',
+                    severity: 'info',
+                    category: 'configuration',
+                    name: 'OPC UA Information Model upgraded to 2.0',
+                    description: 'Upgraded OPC UA Information Model from version 1.0 to version 2.0',
+                    file: filePath,
+                    autoFixed: true,
+                    notes: 'AS6 requires OPC UA Information Model 2.0. Updated OpcUaInformationModels_PV_Version from 1 to 2 and added the new OpcUaInformationModel_Facet, OpcUaInformationModel_TypeInformation and OpcUaInformationModel_BaseObjectTypeForStructures parameters (default value "0").',
+                    details: [`Upgraded ${upgradedModules} module(s) in this file`]
+                });
+            }
+        });
+
+        console.log(`OPC UA Information Model upgrade complete: ${modifiedFiles} file(s) modified`);
+    }
+
+    /**
      * Visual Components firmware version must be updated for AS6
      * Changes <Vc FirmwareVersion="V4.xx.x" /> to <Vc FirmwareVersion="6.0.0" />
      */
@@ -4719,9 +6651,9 @@ ${mappingGroups}
             let modified = false;
             
             // Remove MpWebXs library reference: <Object Type="Library">MpWebXs</Object>
-            const libPattern = />\s*MpWebXs\s*<\/Object>/i;
+            const libPattern = /<Object\s+Type="Library"[^>]*>\s*MpWebXs\s*<\/Object>/i;
             if (libPattern.test(content)) {
-                const removePattern = /\s*<Object[^>]*>\s*MpWebXs\s*<\/Object>\s*\n?/gi;
+                const removePattern = /\s*<Object\s+Type="Library"[^>]*>\s*MpWebXs\s*<\/Object>\s*\n?/gi;
                 content = content.replace(removePattern, '');
                 console.log(`Removed MpWebXs library from ${filePath}`);
                 removedLibraryCount++;
@@ -4729,9 +6661,9 @@ ${mappingGroups}
             }
             
             // Remove .mpwebxs file references: <Object Type="File">*.mpwebxs</Object>
-            const configPattern = /\.mpwebxs\s*<\/Object>/i;
+            const configPattern = /<Object\s+Type="File"[^>]*>[^<]*\.mpwebxs\s*<\/Object>/i;
             if (configPattern.test(content)) {
-                const removeConfigPattern = /\s*<Object[^>]*>[^<]*\.mpwebxs\s*<\/Object>\s*\n?/gi;
+                const removeConfigPattern = /\s*<Object\s+Type="File"[^>]*>[^<]*\.mpwebxs\s*<\/Object>\s*\n?/gi;
                 content = content.replace(removeConfigPattern, '');
                 console.log(`Removed .mpwebxs file reference from ${filePath}`);
                 removedConfigCount++;
@@ -4857,6 +6789,279 @@ ${mappingGroups}
             }
         } catch (error) {
             console.error('Failed to fetch AS6 acp10sys.br:', error);
+        }
+    }
+
+    /**
+     * Add mCoWebSc.mcowebservercfg file to mappCockpit folders in Physical configurations.
+     * This file is required for AS6 mappCockpit web server configuration.
+     * 
+     * Project structure: ROOT/Physical/CONFIG/CPU/mappCockpit/
+     * We find mappCockpit folders by looking for existing mappCockpit/Package.pkg files.
+     */
+    async addMappCockpitWebServerConfig() {
+        // First check if mappCockpit is used in the project
+        const requiredPackages = this.getRequiredTechnologyPackages();
+        if (!requiredPackages.has('mappCockpit')) {
+            console.log('mappCockpit not used in project, skipping webserver config');
+            return;
+        }
+        
+        // Get the mappCockpit version
+        const mappCockpitVersion = requiredPackages.get('mappCockpit').version || '6.0.0';
+        console.log(`mappCockpit version: ${mappCockpitVersion}`);
+        
+        // Find mappCockpit folders by looking for mappCockpit/Package.pkg
+        const mappCockpitFolders = [];
+        this.projectFiles.forEach((file, path) => {
+            // Match: .../mappCockpit/Package.pkg
+            if (path.toLowerCase().endsWith('mappcockpit/package.pkg') || 
+                path.toLowerCase().endsWith('mappcockpit\\package.pkg')) {
+                const separator = path.includes('/') ? '/' : '\\';
+                const folderPath = path.substring(0, path.lastIndexOf(separator));
+                mappCockpitFolders.push({ path: folderPath, separator, packagePkg: path });
+            }
+        });
+        
+        if (mappCockpitFolders.length === 0) {
+            console.log('No mappCockpit folders found');
+            return;
+        }
+        
+        console.log(`Found ${mappCockpitFolders.length} mappCockpit folder(s)`);
+        
+        // Fetch the mCoWebSc.mcowebservercfg template file
+        const templatePath = `LibrariesForAS6/TechnologyPackages/mappCockpit/${mappCockpitVersion}/ObjectCatalog/Elements/mcowebservercfg/Template/mCoWebSc.mcowebservercfg`;
+        
+        try {
+            const response = await fetch(templatePath);
+            if (!response.ok) {
+                console.warn(`Could not fetch mCoWebSc.mcowebservercfg template: ${response.status}`);
+                return;
+            }
+            
+            const templateContent = await response.text();
+            
+            // Add the webserver config file to each mappCockpit folder
+            for (const { path: folderPath, separator, packagePkg } of mappCockpitFolders) {
+                const webServerConfigPath = folderPath + separator + 'mCoWebSc.mcowebservercfg';
+                
+                // Check if the file already exists
+                if (this.projectFiles.has(webServerConfigPath)) {
+                    console.log(`mCoWebSc.mcowebservercfg already exists in ${folderPath}`);
+                    continue;
+                }
+                
+                // Add the webserver config file
+                this.projectFiles.set(webServerConfigPath, {
+                    content: templateContent,
+                    isBinary: false,
+                    type: 'mapp_cockpit',
+                    name: 'mCoWebSc.mcowebservercfg',
+                    extension: '.mcowebservercfg',
+                    hasBOM: false
+                });
+                console.log(`Added mCoWebSc.mcowebservercfg to ${folderPath}`);
+                
+                // Update Package.pkg to include the new file
+                const packageFile = this.projectFiles.get(packagePkg);
+                if (packageFile && packageFile.content && !packageFile.content.includes('mCoWebSc.mcowebservercfg')) {
+                    let packageContent = packageFile.content;
+                    const insertPoint = packageContent.lastIndexOf('</Objects>');
+                    if (insertPoint !== -1) {
+                        const newEntry = '    <Object Type="File">mCoWebSc.mcowebservercfg</Object>\n  ';
+                        packageContent = packageContent.substring(0, insertPoint) + newEntry + packageContent.substring(insertPoint);
+                        this.projectFiles.set(packagePkg, { ...packageFile, content: packageContent });
+                        console.log(`Updated Package.pkg to include mCoWebSc.mcowebservercfg`);
+                    }
+                }
+                
+                // Add to analysis results
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'mappCockpit',
+                    name: 'mappCockpit WebServer Config Added',
+                    description: `Added mCoWebSc.mcowebservercfg for AS6 mappCockpit web server configuration`,
+                    file: webServerConfigPath,
+                    autoFixed: true
+                });
+            }
+        } catch (error) {
+            console.error('Failed to add mappCockpit webserver config:', error);
+        }
+    }
+
+    /**
+     * Get all CPU folder paths from the Physical configuration.
+     * CPU folders are identified by looking for Cpu.sw files in Physical/{Config}/{CPU}/ structure.
+     * 
+     * @returns {Array<{cpuPath: string, separator: string}>} Array of CPU folder paths
+     */
+    getAllCpuFolderPaths() {
+        const cpuFolders = [];
+        
+        this.projectFiles.forEach((file, path) => {
+            // Look for Cpu.sw files which indicate a CPU folder
+            // Path structure: ROOT/Physical/CONFIG_NAME/CPU_NAME/Cpu.sw
+            const pathLower = path.toLowerCase();
+            if (pathLower.endsWith('cpu.sw') || pathLower.endsWith('cpu.sw')) {
+                const separator = path.includes('/') ? '/' : '\\';
+                // Get the CPU folder path (parent of Cpu.sw)
+                const cpuPath = path.substring(0, path.lastIndexOf(separator));
+                cpuFolders.push({ cpuPath, separator });
+            }
+        });
+        
+        console.log(`Found ${cpuFolders.length} CPU folder(s) in Physical configuration`);
+        return cpuFolders;
+    }
+
+    /**
+     * Add AccessAndSecurity/UserRoleSystem folder with BRRole.brrole to all CPU configurations.
+     * This is required for AS6 projects to have proper user role definitions.
+     * 
+     * Project structure: ROOT/Physical/CONFIG/CPU/AccessAndSecurity/UserRoleSystem/
+     */
+    async addUserRoleSystemFiles() {
+        console.log('Adding AccessAndSecurity/UserRoleSystem files to CPU configurations...');
+        
+        const cpuFolders = this.getAllCpuFolderPaths();
+        
+        if (cpuFolders.length === 0) {
+            console.log('No CPU folders found, skipping UserRoleSystem setup');
+            return;
+        }
+        
+        // Template path for BRRole.brrole
+        const brRoleTemplatePath = 'LibrariesForAS6/TechnologyPackages/AAS/n.d/ObjectCatalog/Elements/AccessAndSecurity/Template/AccessAndSecurity/UserRoleSystem/BRRole.brrole';
+        const userRolePkgTemplatePath = 'LibrariesForAS6/TechnologyPackages/AAS/n.d/ObjectCatalog/Elements/AccessAndSecurity/Template/AccessAndSecurity/UserRoleSystem/Package.pkg';
+        const accessSecurityPkgTemplatePath = 'LibrariesForAS6/TechnologyPackages/AAS/n.d/ObjectCatalog/Elements/AccessAndSecurity/Template/AccessAndSecurity/Package.pkg';
+        
+        try {
+            // Fetch template files
+            const [brRoleResponse, userRolePkgResponse, accessSecurityPkgResponse] = await Promise.all([
+                fetch(brRoleTemplatePath),
+                fetch(userRolePkgTemplatePath),
+                fetch(accessSecurityPkgTemplatePath)
+            ]);
+            
+            if (!brRoleResponse.ok) {
+                console.warn(`Could not fetch BRRole.brrole template: ${brRoleResponse.status}`);
+                return;
+            }
+            if (!userRolePkgResponse.ok) {
+                console.warn(`Could not fetch UserRoleSystem Package.pkg template: ${userRolePkgResponse.status}`);
+                return;
+            }
+            if (!accessSecurityPkgResponse.ok) {
+                console.warn(`Could not fetch AccessAndSecurity Package.pkg template: ${accessSecurityPkgResponse.status}`);
+                return;
+            }
+            
+            const brRoleContent = await brRoleResponse.text();
+            const userRolePkgContent = await userRolePkgResponse.text();
+            const accessSecurityPkgContent = await accessSecurityPkgResponse.text();
+            
+            // Add files to each CPU folder
+            for (const { cpuPath, separator } of cpuFolders) {
+                const accessSecurityPath = cpuPath + separator + 'AccessAndSecurity';
+                const userRoleSystemPath = accessSecurityPath + separator + 'UserRoleSystem';
+                const brRolePath = userRoleSystemPath + separator + 'BRRole.brrole';
+                const userRolePkgPath = userRoleSystemPath + separator + 'Package.pkg';
+                const accessSecurityPkgPath = accessSecurityPath + separator + 'Package.pkg';
+                
+                // Check if BRRole.brrole already exists - if so, skip this CPU
+                if (this.projectFiles.has(brRolePath)) {
+                    console.log(`BRRole.brrole already exists in ${cpuPath}`);
+                    continue;
+                }
+                
+                // Add BRRole.brrole
+                this.projectFiles.set(brRolePath, {
+                    content: brRoleContent,
+                    isBinary: false,
+                    type: 'brrole',
+                    name: 'BRRole.brrole',
+                    extension: '.brrole',
+                    hasBOM: false
+                });
+                console.log(`Added BRRole.brrole to ${userRoleSystemPath}`);
+                
+                // Add or update UserRoleSystem/Package.pkg
+                if (!this.projectFiles.has(userRolePkgPath)) {
+                    // Create new UserRoleSystem/Package.pkg with BRRole.brrole
+                    this.projectFiles.set(userRolePkgPath, {
+                        content: userRolePkgContent,
+                        isBinary: false,
+                        type: 'package',
+                        name: 'Package.pkg',
+                        extension: '.pkg',
+                        hasBOM: false
+                    });
+                    console.log(`Created UserRoleSystem/Package.pkg in ${userRoleSystemPath}`);
+                } else {
+                    // Update existing UserRoleSystem/Package.pkg to include BRRole.brrole if not already present
+                    const userRolePkgFile = this.projectFiles.get(userRolePkgPath);
+                    if (userRolePkgFile && typeof userRolePkgFile.content === 'string' && 
+                        !userRolePkgFile.content.includes('BRRole.brrole')) {
+                        let pkgContent = userRolePkgFile.content;
+                        const insertPoint = pkgContent.indexOf('</Objects>');
+                        if (insertPoint !== -1) {
+                            const newEntry = '    <Object Type="File">BRRole.brrole</Object>\n  ';
+                            pkgContent = pkgContent.substring(0, insertPoint) + newEntry + pkgContent.substring(insertPoint);
+                            this.projectFiles.set(userRolePkgPath, { ...userRolePkgFile, content: pkgContent });
+                            console.log(`Updated UserRoleSystem/Package.pkg to include BRRole.brrole`);
+                        }
+                    }
+                }
+                
+                // Add or update AccessAndSecurity/Package.pkg
+                if (!this.projectFiles.has(accessSecurityPkgPath)) {
+                    // Create AccessAndSecurity/Package.pkg with just UserRoleSystem
+                    const minimalAccessSecurityPkg = `<?xml version="1.0" encoding="utf-8"?>
+<?AutomationStudio Version=4.2.1.186?>
+<Package PackageType="AccessAndSecurity" xmlns="http://br-automation.co.at/AS/Package">
+  <Objects>
+    <Object Type="Package">UserRoleSystem</Object>
+  </Objects>
+</Package>`;
+                    this.projectFiles.set(accessSecurityPkgPath, {
+                        content: minimalAccessSecurityPkg,
+                        isBinary: false,
+                        type: 'package',
+                        name: 'Package.pkg',
+                        extension: '.pkg',
+                        hasBOM: false
+                    });
+                    console.log(`Created AccessAndSecurity/Package.pkg in ${accessSecurityPath}`);
+                } else {
+                    // Update existing AccessAndSecurity/Package.pkg to include UserRoleSystem if not already present
+                    const accessPkgFile = this.projectFiles.get(accessSecurityPkgPath);
+                    if (accessPkgFile && typeof accessPkgFile.content === 'string' && 
+                        !accessPkgFile.content.includes('UserRoleSystem')) {
+                        let pkgContent = accessPkgFile.content;
+                        const insertPoint = pkgContent.indexOf('</Objects>');
+                        if (insertPoint !== -1) {
+                            const newEntry = '    <Object Type="Package">UserRoleSystem</Object>\n  ';
+                            pkgContent = pkgContent.substring(0, insertPoint) + newEntry + pkgContent.substring(insertPoint);
+                            this.projectFiles.set(accessSecurityPkgPath, { ...accessPkgFile, content: pkgContent });
+                            console.log(`Updated AccessAndSecurity/Package.pkg to include UserRoleSystem`);
+                        }
+                    }
+                }
+                
+                // Add to analysis results
+                this.analysisResults.push({
+                    severity: 'info',
+                    category: 'AccessAndSecurity',
+                    name: 'UserRoleSystem Added',
+                    description: `Added AccessAndSecurity/UserRoleSystem with BRRole.brrole for AS6 user role definitions`,
+                    file: brRolePath,
+                    autoFixed: true
+                });
+            }
+        } catch (error) {
+            console.error('Failed to add UserRoleSystem files:', error);
         }
     }
 
@@ -5478,56 +7683,162 @@ ${mappingGroups}
         const container = this.elements.findingsList;
         container.innerHTML = '';
         
-        // Group by type
-        const grouped = {
-            project: [],
-            compiler: [],
-            runtime: [],
-            technology_package: [],
-            package: [],
-            library: [],
-            library_version: [],
-            function: [],
-            function_block: [],
-            hardware: [],
-            task_config: [],
-            motion: [],
-            localization: [],
-            visualization: []
-        };
-        
-        this.getFilteredFindings().forEach(finding => {
-            if (grouped[finding.type]) {
-                grouped[finding.type].push(finding);
+        const filtered = this.getFilteredFindings();
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>No findings match the current filters.</p></div>';
+            this.updateSelectedCount();
+            return;
+        }
+
+        // ---- 1. Separate auto-applied from manual-review findings ----
+        const autoApplied = [];
+        const manualReview = [];
+        filtered.forEach(f => {
+            if (f.autoFixed) {
+                autoApplied.push(f);
             } else {
-                grouped.project.push(finding);
+                manualReview.push(f);
             }
         });
-        
-        // Render each group
-        Object.entries(grouped).forEach(([type, findings]) => {
-            if (findings.length === 0) return;
-            
-            const groupEl = document.createElement('div');
-            groupEl.className = 'findings-group';
-            
-            const header = document.createElement('div');
-            header.className = 'group-header';
-            header.innerHTML = `
-                <span class="group-icon">${this.getTypeIcon(type)}</span>
-                <span class="group-name">${this.formatTypeName(type)}</span>
-                <span class="group-count">(${findings.length})</span>
-            `;
-            groupEl.appendChild(header);
-            
-            findings.forEach(finding => {
-                groupEl.appendChild(this.createFindingCard(finding));
-            });
-            
-            container.appendChild(groupEl);
-        });
-        
+
+        // ---- 2. Render "Needs Review" section first (expanded), then "Auto-Applied" (collapsed) ----
+        if (manualReview.length > 0) {
+            container.appendChild(this.buildFindingsSuperGroup(
+                '🔍 Needs Review',
+                manualReview,
+                true  // start expanded
+            ));
+        }
+
+        if (autoApplied.length > 0) {
+            container.appendChild(this.buildFindingsSuperGroup(
+                '✅ Auto-Applied Conversions',
+                autoApplied,
+                false // start collapsed
+            ));
+        }
+
         this.updateSelectedCount();
+    }
+
+    /**
+     * Build a super-group section (e.g. "Needs Review" / "Auto-Applied")
+     * containing collapsible type sub-groups.
+     */
+    buildFindingsSuperGroup(title, findings, startOpen) {
+        const section = document.createElement('details');
+        section.className = 'findings-super-group';
+        if (startOpen) section.open = true;
+
+        // Count severities for the super-group badge
+        const counts = { error: 0, warning: 0, info: 0 };
+        findings.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+
+        const summary = document.createElement('summary');
+        summary.className = 'findings-super-header';
+        let badgesHtml = `<span class="tree-count">(${findings.length})</span>`;
+        if (counts.error > 0) badgesHtml += ` <span class="findings-badge badge-error">${counts.error} error${counts.error > 1 ? 's' : ''}</span>`;
+        if (counts.warning > 0) badgesHtml += ` <span class="findings-badge badge-warning">${counts.warning} warning${counts.warning > 1 ? 's' : ''}</span>`;
+        if (counts.info > 0) badgesHtml += ` <span class="findings-badge badge-info">${counts.info} info</span>`;
+        summary.innerHTML = `<strong>${title}</strong> ${badgesHtml}`;
+        section.appendChild(summary);
+
+        // Group by type within this super-group
+        const byType = new Map();
+        findings.forEach(f => {
+            const type = f.type || 'project';
+            if (!byType.has(type)) byType.set(type, []);
+            byType.get(type).push(f);
+        });
+
+        // Render type groups in a logical order
+        const typeOrder = [
+            'project', 'compiler', 'runtime', 'technology_package', 'package',
+            'library', 'library_version', 'deprecated_function_call', 'deprecated_constant',
+            'deprecated_motion_type', 'deprecated_function_block', 'deprecated_struct_member',
+            'deprecated_member_rename',
+            'function', 'function_block', 'hardware', 'task_config',
+            'motion', 'localization', 'visualization', 'safety_config', 'vc_firmware'
+        ];
+
+        // Add any types not in the predefined order
+        byType.forEach((_, type) => {
+            if (!typeOrder.includes(type)) typeOrder.push(type);
+        });
+
+        for (const type of typeOrder) {
+            const typeFindings = byType.get(type);
+            if (!typeFindings || typeFindings.length === 0) continue;
+
+            section.appendChild(this.buildFindingsTypeGroup(type, typeFindings));
+        }
+
+        return section;
+    }
+
+    /**
+     * Build a collapsible type group (e.g. "📚 Libraries (12)")
+     * with findings further sub-grouped by file path.
+     */
+    buildFindingsTypeGroup(type, findings) {
+        const details = document.createElement('details');
+        details.className = 'findings-type-group';
+
+        // Severity breakdown for this type
+        const counts = { error: 0, warning: 0, info: 0 };
+        findings.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+
+        let badgesHtml = '';
+        if (counts.error > 0) badgesHtml += `<span class="findings-badge badge-error">${counts.error}</span>`;
+        if (counts.warning > 0) badgesHtml += `<span class="findings-badge badge-warning">${counts.warning}</span>`;
+        if (counts.info > 0) badgesHtml += `<span class="findings-badge badge-info">${counts.info}</span>`;
+
+        const summary = document.createElement('summary');
+        summary.className = 'findings-type-header';
+        summary.innerHTML = `
+            <span class="group-icon">${this.getTypeIcon(type)}</span>
+            <span class="group-name">${this.formatTypeName(type)}</span>
+            <span class="tree-count">(${findings.length})</span>
+            <span class="findings-type-badges">${badgesHtml}</span>
+        `;
+        details.appendChild(summary);
+
+        // Sub-group by file path
+        const byFile = new Map();
+        findings.forEach(f => {
+            const file = f.file || '(no file)';
+            if (!byFile.has(file)) byFile.set(file, []);
+            byFile.get(file).push(f);
+        });
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'findings-type-content';
+
+        if (byFile.size === 1) {
+            // Single file — just render cards directly
+            findings.forEach(f => contentDiv.appendChild(this.createFindingCard(f)));
+        } else {
+            // Multiple files — sub-group by file (collapsible)
+            byFile.forEach((fileFindings, filePath) => {
+                const fileDetails = document.createElement('details');
+                fileDetails.className = 'findings-file-group';
+
+                const fileSummary = document.createElement('summary');
+                fileSummary.className = 'findings-file-header';
+                fileSummary.innerHTML = `📄 <span class="findings-file-path">${this.shortenPath(filePath, 80)}</span> <span class="tree-count">(${fileFindings.length})</span>`;
+                fileDetails.appendChild(fileSummary);
+
+                const fileContent = document.createElement('div');
+                fileContent.className = 'findings-file-content';
+                fileFindings.forEach(f => fileContent.appendChild(this.createFindingCard(f)));
+                fileDetails.appendChild(fileContent);
+
+                contentDiv.appendChild(fileDetails);
+            });
+        }
+
+        details.appendChild(contentDiv);
+        return details;
     }
 
     /**
@@ -5786,7 +8097,10 @@ ${mappingGroups}
             function_block: '🧩',
             deprecated_function_call: '🔄',
             deprecated_constant: '🔢',
+            deprecated_motion_type: '🔀',
             deprecated_function_block: '🚫',
+            deprecated_struct_member: '🚫',
+            deprecated_member_rename: '✏️',
             hardware: '🔌',
             project: '📁',
             technology_package: '📦',
@@ -5796,7 +8110,9 @@ ${mappingGroups}
             localization: '🌐',
             compiler: '🛠️',
             runtime: '▶️',
-            visualization: '🖥️'
+            visualization: '🖥️',
+            opcua_config: '🔗',
+            opcua_information_model: '🔗'
         };
         return icons[type] || '📄';
     }
@@ -5809,7 +8125,10 @@ ${mappingGroups}
             function_block: 'Function Blocks',
             deprecated_function_call: 'Deprecated Function Calls',
             deprecated_constant: 'Deprecated Constants',
+            deprecated_motion_type: 'Deprecated Motion Types',
             deprecated_function_block: 'Removed Function Blocks',
+            deprecated_struct_member: 'Removed Struct Members',
+            deprecated_member_rename: 'Renamed Members',
             hardware: 'Hardware Modules',
             project: 'Project Format',
             technology_package: 'Technology Packages',
@@ -5821,7 +8140,9 @@ ${mappingGroups}
             runtime: 'Automation Runtime',
             visualization: 'Visualization (VC3/VC4)',
             safety_config: 'Safety Configuration',
-            vc_firmware: 'Visual Components'
+            vc_firmware: 'Visual Components',
+            opcua_config: 'OPC UA Configuration',
+            opcua_information_model: 'OPC UA Information Model'
         };
         return names[type] || type;
     }
@@ -6034,6 +8355,19 @@ ${mappingGroups}
             const escapedOld = oldConst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             after = before.replace(new RegExp(`\\b${escapedOld}\\b`, 'gi'), newConst);
             notes = finding.notes || `Replace ${oldConst} with ${newConst}`;
+        } else if (finding.type === 'deprecated_motion_type' && finding.conversion) {
+            // Deprecated motion type replacement (e.g., McAcpAxCamAutParType → McCamAutParType)
+            const oldType = finding.conversion.from;
+            const newType = finding.conversion.to;
+            const escapedOld = oldType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            after = before.replace(new RegExp(`\\b${escapedOld}\\b`, 'gi'), newType);
+            notes = finding.notes || `Replace ${oldType} with ${newType}`;
+        } else if (finding.type === 'deprecated_member_rename' && finding.conversion) {
+            // Member rename replacement (e.g., MpReportCore_0.Name → MpReportCore_0.FileName)
+            // Uses pattern-based replacement to preserve the variable name
+            const pattern = new RegExp(finding.conversion.pattern, 'gi');
+            after = before.replace(pattern, finding.conversion.replacement);
+            notes = finding.notes || `Replace ${finding.conversion.from} with ${finding.conversion.to}`;
         } else if (finding.type === 'hardware' && finding.replacement) {
             // Replace hardware reference
             after = before.replace(finding.name, finding.replacement.name);
@@ -6262,6 +8596,28 @@ ${mappingGroups}
             // Track constant replacements for reporting
             this.constantReplacements = this.constantReplacements || new Map();
             this.constantReplacements.set(oldConst, newConst);
+        } else if (finding.type === 'deprecated_motion_type' && finding.conversion && finding.autoReplace) {
+            // Deprecated motion type replacement (McAcpAx* → Mc* types)
+            const oldType = finding.conversion.from;
+            const newType = finding.conversion.to;
+            
+            // Replace type: use word boundary to match standalone identifiers
+            const escapedOld = oldType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`\\b${escapedOld}\\b`, 'g');
+            convertedContent = originalContent.replace(pattern, newType);
+            
+            // Track type replacements for reporting
+            this.motionTypeReplacements = this.motionTypeReplacements || new Map();
+            this.motionTypeReplacements.set(oldType, newType);
+        } else if (finding.type === 'deprecated_member_rename' && finding.conversion && finding.autoReplace) {
+            // Struct/FB member rename (e.g., MpReportCore_0.Name → MpReportCore_0.FileName)
+            // Uses pattern-based replacement to only match variables containing the FB type name
+            const pattern = new RegExp(finding.conversion.pattern, 'gi');
+            convertedContent = originalContent.replace(pattern, finding.conversion.replacement);
+            
+            // Track member renames for reporting
+            this.memberRenames = this.memberRenames || new Map();
+            this.memberRenames.set(finding.conversion.from, finding.conversion.to);
         } else if (finding.type === 'library' && finding.autoReplace && finding.replacement) {
             // Library reference replacement (e.g., AsString → AsBrStr in LIBRARY declarations)
             const oldLib = finding.name;
@@ -6271,8 +8627,9 @@ ${mappingGroups}
             if (finding.file.toLowerCase().endsWith('package.pkg')) {
                 // For Package.pkg files, check if the replacement library already exists
                 // If so, remove the deprecated library entry instead of renaming
-                const newLibPattern = new RegExp(`>\\s*${newLib}\\s*<\\/Object>`, 'i');
-                const oldLibLinePattern = new RegExp(`\\s*<Object[^>]*>\\s*${oldLib}\\s*<\\/Object>\\s*\\n?`, 'gi');
+                // IMPORTANT: Only match Type="Library", not Type="Package" or Type="File"
+                const newLibPattern = new RegExp(`<Object\\s+Type="Library"[^>]*>\\s*${newLib}\\s*<\\/Object>`, 'i');
+                const oldLibLinePattern = new RegExp(`\\s*<Object\\s+Type="Library"[^>]*>\\s*${oldLib}\\s*<\\/Object>\\s*\\n?`, 'gi');
                 
                 if (newLibPattern.test(originalContent)) {
                     // Replacement library already exists - remove the deprecated library entry
@@ -6281,8 +8638,8 @@ ${mappingGroups}
                 } else {
                     // Replacement library doesn't exist - rename the deprecated library
                     const escapedOld = oldLib.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const pattern = new RegExp(`>\\s*${escapedOld}\\s*<\\/Object>`, 'gi');
-                    convertedContent = originalContent.replace(pattern, `>${newLib}</Object>`);
+                    const pattern = new RegExp(`(<Object\\s+Type="Library"[^>]*>\\s*)${escapedOld}(\\s*<\\/Object>)`, 'gi');
+                    convertedContent = originalContent.replace(pattern, `$1${newLib}$2`);
                 }
             } else if (finding.file.toLowerCase().endsWith('.sw')) {
                 // For .sw files, check if the replacement library already exists
@@ -6637,16 +8994,33 @@ ${mappingGroups}
             const finding = this.analysisResults.find(f => f.id === id);
             if (finding) filesModified.add(finding.file);
         });
+        // Also count files touched by auto-applied conversions
+        this.analysisResults.forEach(f => {
+            if (f.autoFixed) filesModified.add(f.file);
+        });
+        
+        const appliedCount = this.appliedConversions.size +
+            this.analysisResults.filter(f => f.autoFixed && !this.appliedConversions.has(f.id)).length;
         
         return {
             timestamp: new Date().toISOString(),
             totalFindings: this.analysisResults.length,
             bySeveity,
-            applied: this.appliedConversions.size,
-            skipped: this.analysisResults.filter(f => f.status === 'skipped').length,
+            applied: appliedCount,
+            skipped: this.analysisResults.filter(f => this.getReportStatus(f) === 'skipped').length,
             filesModified: filesModified.size,
             findings: this.analysisResults
         };
+    }
+
+    /**
+     * Resolve the correct report status for a finding.
+     * Auto-applied findings bypass addFinding() and never get a status assigned,
+     * so their f.status is undefined — which must be treated as 'applied'.
+     */
+    getReportStatus(f) {
+        if (f.autoFixed) return 'applied';
+        return f.status || 'pending';
     }
 
     resetReportUI() {
@@ -6689,14 +9063,14 @@ ${mappingGroups}
     generateCSV(report) {
         const headers = ['Type', 'Name', 'Severity', 'Description', 'File', 'Line', 'Replacement', 'Status'];
         const rows = report.findings.map(f => [
-            f.type,
+            f.type || '',
             f.name,
             f.severity,
-            `"${f.description.replace(/"/g, '""')}"`,
+            `"${(f.description || '').replace(/"/g, '""')}"`,
             f.file,
             f.line || '',
             f.replacement ? f.replacement.name || f.replacement : '',
-            f.status
+            this.getReportStatus(f)
         ]);
         
         return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -6759,17 +9133,20 @@ ${mappingGroups}
             </tr>
         </thead>
         <tbody>
-            ${report.findings.map(f => `
+            ${report.findings.map(f => {
+                const status = this.getReportStatus(f);
+                const statusColor = status === 'applied' ? '#27ae60' : status === 'skipped' ? '#95a5a6' : status === 'pending' ? '#e67e22' : '#7f8c8d';
+                return `
                 <tr>
-                    <td>${f.type}</td>
+                    <td>${f.type || ''}</td>
                     <td>${f.name}</td>
                     <td><span class="severity-badge ${f.severity}">${f.severity}</span></td>
-                    <td>${f.description}</td>
-                    <td>${f.file}</td>
+                    <td>${f.description || ''}</td>
+                    <td>${f.file || ''}</td>
                     <td>${f.replacement ? (f.replacement.name || f.replacement) : 'N/A'}</td>
-                    <td>${f.status}</td>
-                </tr>
-            `).join('')}
+                    <td><span style="color:${statusColor};font-weight:600">${status}</span></td>
+                </tr>`;
+            }).join('')}
         </tbody>
     </table>
     
@@ -6811,6 +9188,12 @@ ${mappingGroups}
         // Replace acp10sys.br files in Physical folders with AS6 version
         await this.replaceAcp10sysBrFiles();
         
+        // Add mCoWebSc.mcowebservercfg to mappCockpit folders if mappCockpit is used
+        await this.addMappCockpitWebServerConfig();
+        
+        // Add AccessAndSecurity/UserRoleSystem with BRRole.brrole to all CPU configurations
+        await this.addUserRoleSystemFiles();
+        
         // Show progress dialog
         const progressDialog = document.getElementById('downloadProgressDialog');
         const progressBar = document.getElementById('progressBar');
@@ -6828,43 +9211,92 @@ ${mappingGroups}
         // Create project folder in ZIP
         const projectFolder = zip.folder(projectName + '_AS6');
         
-        // Get list of technology package libraries whose files will be replaced with AS6 versions
-        // We'll skip ALL files from these libraries and fetch fresh AS6 versions instead
-        // Libraries without AS6 replacement files (as6LibVersion: null) will be copied as-is from AS4
+        // Build the set of technology package libraries that SHOULD be replaced with AS6 versions.
+        // Libraries without AS6 replacement files (as6LibVersion: null) are kept as-is from AS4.
         const techPackageLibraries = new Set();
         
         Object.entries(DeprecationDatabase.as6Format.libraryMapping).forEach(([libName, mapping]) => {
             const hasReplacementFiles = mapping.as6LibVersion !== null && mapping.as6LibVersion !== undefined;
             if ((mapping.techPackage || mapping.source === 'Library_2') && hasReplacementFiles) {
-                // Library has AS6 replacement files to fetch - skip AS4 version
                 techPackageLibraries.add(libName.toLowerCase());
             }
-            // Libraries with null version will NOT be added to techPackageLibraries,
-            // so their AS4 files will be copied as-is
         });
         
-        // Add all project files with their directory structure
-        // Skip files from technology package libraries - they'll be replaced with AS6 versions
-        // Libraries not in techPackageLibraries (including runtime libraries) are copied as-is
+        // ── Fetch AS6 library files FIRST, so we know which replacements succeeded ──
+        // This prevents the scenario where AS4 files are skipped but the fetch fails,
+        // leaving the converted project with missing libraries.
+        let as6LibraryFiles = new Map();
+        let successfullyFetchedLibraries = new Set(); // lowercase lib names that were actually fetched
+        
+        if (requiredPackages.size > 0) {
+            progressMessage.textContent = 'Fetching AS6 library files...';
+            progressBar.style.width = '5%';
+            progressPercent.textContent = '5%';
+            
+            console.log('=== Starting AS6 library fetch ===');
+            console.log('Required packages:', requiredPackages.size);
+            requiredPackages.forEach((pkg, name) => {
+                console.log(`  Package: ${name}, libraries: ${pkg.libraries.size}`);
+                pkg.libraries.forEach((lib, libName) => {
+                    console.log(`    - ${libName}: version=${lib.version}`);
+                });
+            });
+            
+            as6LibraryFiles = await this.fetchAS6LibraryFiles(requiredPackages, (fetched, total) => {
+                const pct = 5 + Math.floor((fetched / total) * 15);
+                progressBar.style.width = pct + '%';
+                progressPercent.textContent = pct + '%';
+            });
+            
+            console.log(`=== Fetched ${as6LibraryFiles.size} AS6 library files ===`);
+            if (as6LibraryFiles.size > 0) {
+                const fileList = Array.from(as6LibraryFiles.keys());
+                console.log('First 10 fetched files:', fileList.slice(0, 10));
+            }
+            
+            // Build set of library names for which we actually fetched replacement files
+            for (const [relativePath] of as6LibraryFiles) {
+                const libMatch = relativePath.match(/^Libraries[/\\]([^/\\]+)/i);
+                if (libMatch) {
+                    successfullyFetchedLibraries.add(libMatch[1].toLowerCase());
+                }
+            }
+            console.log(`Successfully fetched replacements for ${successfullyFetchedLibraries.size} libraries: ${Array.from(successfullyFetchedLibraries).join(', ')}`);
+            
+            // Warn about libraries that should have been replaced but weren't fetched
+            const missingReplacements = [];
+            for (const libName of techPackageLibraries) {
+                if (!successfullyFetchedLibraries.has(libName)) {
+                    missingReplacements.push(libName);
+                }
+            }
+            if (missingReplacements.length > 0) {
+                console.warn(`WARNING: ${missingReplacements.length} library replacements could not be fetched (AS4 versions will be kept): ${missingReplacements.join(', ')}`);
+            }
+        } else {
+            console.log('=== No required packages detected, skipping AS6 library fetch ===');
+        }
+        
+        // ── Add project files to ZIP, skipping ONLY libraries that were successfully fetched ──
+        progressMessage.textContent = 'Creating ZIP archive...';
         let fileCount = 0;
         let skippedLibraryFiles = 0;
         const totalFiles = this.projectFiles.size;
         this.projectFiles.forEach((file, path) => {
-            // Check if this file is inside a technology package library folder
             const pathParts = path.toLowerCase().split(/[/\\]/);
             const libIndex = pathParts.indexOf('libraries');
             let skipLibraryFile = false;
             
             if (libIndex >= 0 && libIndex < pathParts.length - 1) {
                 const libName = pathParts[libIndex + 1];
-                if (techPackageLibraries.has(libName)) {
+                // Only skip if we SUCCESSFULLY fetched AS6 replacement files for this library
+                if (successfullyFetchedLibraries.has(libName)) {
                     skipLibraryFile = true;
                     skippedLibraryFiles++;
                 }
             }
             
             if (!skipLibraryFile) {
-                // For binary files, pass the ArrayBuffer with binary option
                 if (file.isBinary) {
                     projectFolder.file(path, file.content, { binary: true });
                 } else {
@@ -6872,14 +9304,13 @@ ${mappingGroups}
                 }
             }
             fileCount++;
-            // Update progress to 50% during file addition
-            const percent = Math.floor((fileCount / totalFiles) * 50);
+            const percent = 20 + Math.floor((fileCount / totalFiles) * 30);
             progressBar.style.width = percent + '%';
             progressPercent.textContent = percent + '%';
         });
         
         if (skippedLibraryFiles > 0) {
-            console.log(`Skipped ${skippedLibraryFiles} files from technology package and runtime libraries`);
+            console.log(`Skipped ${skippedLibraryFiles} AS4 library files (replaced with AS6 versions)`);
         }
         
         // Add AS6 structural changes info
@@ -6913,44 +9344,16 @@ ${mappingGroups}
         const summary = this.generateConversionSummary();
         projectFolder.file('_conversion-summary.txt', summary);
         
-        // Fetch and add AS6 library files from bundled LibrariesForAS6 folder
-        if (requiredPackages.size > 0) {
-            progressMessage.textContent = 'Fetching AS6 library files...';
+        // Add fetched AS6 library files to the ZIP (in Logical/Libraries folder)
+        if (as6LibraryFiles.size > 0) {
+            progressMessage.textContent = 'Adding AS6 library files to ZIP...';
             progressBar.style.width = '56%';
             progressPercent.textContent = '56%';
             
-            console.log('=== Starting AS6 library fetch ===');
-            console.log('Required packages:', requiredPackages.size);
-            requiredPackages.forEach((pkg, name) => {
-                console.log(`  Package: ${name}, libraries: ${pkg.libraries.size}`);
-                pkg.libraries.forEach((lib, libName) => {
-                    console.log(`    - ${libName}: version=${lib.version}`);
-                });
-            });
-            
-            const as6LibraryFiles = await this.fetchAS6LibraryFiles(requiredPackages, (fetched, total) => {
-                const pct = 56 + Math.floor((fetched / total) * 4);
-                progressBar.style.width = pct + '%';
-                progressPercent.textContent = pct + '%';
-            });
-            
-            console.log(`=== Fetched ${as6LibraryFiles.size} AS6 library files ===`);
-            if (as6LibraryFiles.size > 0) {
-                // Show first 10 files that were fetched
-                const fileList = Array.from(as6LibraryFiles.keys());
-                console.log('First 10 fetched files:', fileList.slice(0, 10));
-            }
-            
-            // Add AS6 library files to the ZIP (in Logical/Libraries folder)
-            // Need to determine the project folder prefix from existing files
-            // Look for the actual Logical/Libraries path, not SafeLOGIC paths
+            // Determine the project folder prefix from existing files
             let projectFolderPrefix = '';
             for (const [path] of this.projectFiles) {
-                // Skip SafeLOGIC paths - they have their own Logical folder structure
-                if (path.toLowerCase().includes('safelogic')) {
-                    continue;
-                }
-                // Look for Logical/Libraries specifically to find the correct project root
+                if (path.toLowerCase().includes('safelogic')) continue;
                 const logicalLibrariesMatch = path.match(/^(.*?)Logical[/\\]Libraries[/\\]/i);
                 if (logicalLibrariesMatch) {
                     projectFolderPrefix = logicalLibrariesMatch[1];
@@ -6958,12 +9361,9 @@ ${mappingGroups}
                 }
             }
             
-            // Fallback: if no Logical/Libraries found, look for just Logical (but not in SafeLOGIC)
             if (!projectFolderPrefix) {
                 for (const [path] of this.projectFiles) {
-                    if (path.toLowerCase().includes('safelogic')) {
-                        continue;
-                    }
+                    if (path.toLowerCase().includes('safelogic')) continue;
                     const logicalMatch = path.match(/^(.*?)Logical[/\\]/i);
                     if (logicalMatch) {
                         projectFolderPrefix = logicalMatch[1];
@@ -6974,38 +9374,30 @@ ${mappingGroups}
             
             console.log(`Project folder prefix: "${projectFolderPrefix}"`);
             
-            // Build a set of existing library paths that are NOT being replaced with AS6 versions
-            // Libraries in techPackageLibraries are being replaced, so they should NOT be in existingLibraryPaths
+            // Build set of custom library paths (NOT being replaced) to avoid overwriting them
             const existingLibraryPaths = new Set();
             for (const [path] of this.projectFiles) {
                 const pathLower = path.toLowerCase();
                 if (pathLower.includes('/libraries/') || pathLower.includes('\\libraries\\')) {
-                    // Extract the relative library path (e.g., "Libraries/AsBrStr/...")
                     const libMatch = pathLower.match(/libraries[/\\]([^/\\]+)/i);
                     if (libMatch) {
                         const libName = libMatch[1].toLowerCase();
-                        // Only mark as "existing" if this library is NOT being replaced with an AS6 version
-                        // Libraries in techPackageLibraries are being replaced, so we should add the AS6 version
                         if (!techPackageLibraries.has(libName)) {
                             existingLibraryPaths.add(libName);
                         }
                     }
                 }
             }
-            console.log(`Existing libraries NOT being replaced: ${Array.from(existingLibraryPaths).join(', ')}`);
-            console.log(`Libraries being replaced with AS6 versions: ${Array.from(techPackageLibraries).join(', ')}`);
             
             let addedLibFiles = 0;
             let skippedLibFiles = 0;
             for (const [relativePath, fileData] of as6LibraryFiles) {
-                // Check if this library already exists in the project AND is NOT being replaced
                 const libMatch = relativePath.match(/^Libraries[/\\]([^/\\]+)/i);
                 const libName = libMatch ? libMatch[1].toLowerCase() : null;
                 
                 if (libName && existingLibraryPaths.has(libName)) {
-                    // Skip - library already exists in project and is NOT being replaced
                     if (skippedLibFiles < 3) {
-                        console.log(`  Skipping (already exists and not being replaced): ${relativePath}`);
+                        console.log(`  Skipping (custom library, not being replaced): ${relativePath}`);
                     }
                     skippedLibFiles++;
                     continue;
@@ -7023,21 +9415,15 @@ ${mappingGroups}
                 addedLibFiles++;
             }
             console.log(`Added ${addedLibFiles} AS6 library files to ZIP, skipped ${skippedLibFiles} (custom libraries not being replaced)`);
+        } else if (requiredPackages.size > 0) {
+            // Required packages were detected but no files were fetched - show warning
+            const missingLibs = Array.from(techPackageLibraries).join(', ');
+            console.error('WARNING: AS6 library files could not be fetched. AS4 library versions have been preserved as fallback.');
+            console.error('Libraries that could not be updated:', missingLibs);
+            console.error('Make sure you are running this tool via a web server (not file:// protocol).');
             
-            // Show warning if no library files were added despite having packages to fetch
-            if (addedLibFiles === 0 && as6LibraryFiles.size === 0) {
-                const missingLibs = Array.from(techPackageLibraries).join(', ');
-                console.error('WARNING: No AS6 library files were fetched. The converted project may be missing required libraries.');
-                console.error('Missing libraries:', missingLibs);
-                console.error('Please ensure you are running this tool via a web server (not file:// protocol).');
-                console.error('Check the browser console for any fetch errors.');
-                
-                // Add a visible note to the conversion report
-                const warningNote = `\n\n=== WARNING ===\nNo AS6 library files were fetched. The following libraries may be missing:\n${missingLibs}\n\nPlease ensure you are running this tool via a web server and check the browser console for errors.`;
-                projectFolder.file('_conversion-summary.txt', summary + warningNote);
-            }
-        } else {
-            console.log('=== No required packages, skipping AS6 library fetch ===');
+            const warningNote = `\n\n=== WARNING ===\nAS6 library files could not be fetched. The AS4 library versions have been preserved as fallback.\nThe following libraries were NOT updated to AS6 versions:\n${missingLibs}\n\nTo fix: ensure you are running this tool via a web server and check the browser console for errors.`;
+            projectFolder.file('_conversion-summary.txt', summary + warningNote);
         }
         
         // Generate ZIP file

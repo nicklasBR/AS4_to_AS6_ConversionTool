@@ -3,14 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>AS4 to AS6 Conversion Tool</title>
-    <link rel="stylesheet" href="as4-converter-styles.css?v=20260121c">
+    <link rel="stylesheet" href="as4-converter-styles.css?v=20260204a">
 </head>
 <body>
     <div class="app-container">
         <header class="app-header">
             <h1>🔄 AS4 to AS6 Conversion Tool</h1>
             <p class="subtitle">Analyze and migrate B&R Automation Studio projects</p>
+            <a href="FEATURE_OVERVIEW.html" style="color: #ff9800; text-decoration: none; font-size: 0.9rem; margin-top: 0.5rem; display: inline-block;">📖 Feature Overview</a>
+            <p class="debug-version" id="debugVersion" style="display: none;"></p>
         </header>
 
         <nav class="tab-navigation">
@@ -292,6 +297,19 @@
             </div>
         </div>
 
+        <!-- Scan Progress Dialog -->
+        <div id="scanProgressDialog" class="progress-dialog hidden">
+            <div class="progress-dialog-content">
+                <h3>🔍 Scanning for Deprecations</h3>
+                <p id="scanProgressMessage">Analyzing files...</p>
+                <div class="progress-bar-container">
+                    <div id="scanProgressBar" class="progress-bar"></div>
+                    <span id="scanProgressPercent" class="progress-percent">0%</span>
+                </div>
+                <p id="scanProgressDetails" class="progress-details"></p>
+            </div>
+        </div>
+
         <!-- Progress Dialog -->
         <div id="downloadProgressDialog" class="progress-dialog hidden">
             <div class="progress-dialog-content">
@@ -338,7 +356,7 @@
     </div>
 
     <script src="jszip.min.js"></script>
-    <script src="deprecation-database.js?v=20260123a"></script>
-    <script src="as4-converter.js?v=20260123a"></script>
+    <script src="deprecation-database.js?v=20260505a"></script>
+    <script src="as4-converter.js?v=20260505a"></script>
 </body>
 </html>
